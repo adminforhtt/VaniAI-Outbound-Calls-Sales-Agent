@@ -1,128 +1,122 @@
 <div align="center">
 
-# 🎙️ Vani AI: Outbound Sales Agent
-**Ultra Low-Latency Conversational AI for Next-Gen Telephony**
+# 🎙️ Vani AI: Enterprise Outbound Sales Agent
+**Production-Grade Conversational AI for Multi-Tenant SaaS**
 
+[![Railway](https://img.shields.io/badge/Railway-0B0D0E?style=for-the-badge&logo=railway)](https://railway.app/)
+[![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel)](https://vercel.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Twilio](https://img.shields.io/badge/Twilio-F22F46?style=for-the-badge&logo=Twilio&logoColor=white)](https://www.twilio.com/)
-[![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
-[![Celery](https://img.shields.io/badge/celery-%2337814A.svg?style=for-the-badge&logo=celery&logoColor=white)](https://docs.celeryq.dev/en/stable/)
 
 <p align="center">
-  <em>A production-ready AI outbound caller featuring ultra-low latency real-time voice streaming, Indic language support, dynamic soft-barge-in, and post-call analytics.</em>
+  <em>A high-performance outbound caller featuring ultra-low latency streaming, multi-tenant SaaS architecture, autonomous lead research (Hermes), and production-ready cloud deployment.</em>
 </p>
 
 </div>
 
 ---
 
-## ✨ Features
+## 🚀 Key Production Features
 
-- **⚡ Sub-Second Latency:** Ultra-optimized websocket connections merging VAD, early-LLM prompts, and asynchronous TTS to achieve < 800ms conversational turnarounds.
-- **🗣️ Advanced Indic Support:** Deeply integrated with Sarvam AI for flawless understanding and generation of Hindi, Marathi, Bengali, Tamil, Telugu, and more natively.
-- **🛡️ Soft Barge-In System:** Detects user overlaps instinctively to halt TTS gracefully using confidence-gated STT buffering.
-- **⚙️ Dynamic Conversational Engine:** Driven by Llama-3 (70B) via OpenRouter/Groq, injecting dynamic context including custom tenant limits, live intents, and multi-stage sales funnels.
-- **📊 Realtime Analytics:** Post-call async ingestion using Celery and Redis to extract deep insights, qualification scores, and CRM metadata without blocking server processing threads.
+- **⚡ Ultra-Low Latency:** Sub-800ms turn-around time using optimized WebSockets, VAD-gated streaming, and Groq/OpenRouter acceleration.
+- **🛰️ Hermes Intelligence Engine:** Pre-call autonomous lead research using **Nous Research Hermes** + Browserbase. Scrapes the live web to generate personalized scripts and icebreakers.
+- **🛡️ Enterprise Multi-Tenancy:** Powered by **Supabase Auth** and PostgreSQL. Strict Row-Level Security (RLS) and tenant isolation for multiple business users.
+- **🗣️ Native Indic Support:** Flawless conversational fluency in 11+ Indic languages (Hindi, Marathi, Bengali, Tamil, etc.) via **Sarvam AI**.
+- **💳 Fully Integrated SaaS:** Built-in billing logic, Razorpay support, and automated credit tracking per tenant.
 
 ---
 
-## 🏗️ Architecture Engine
+## 🏗️ Cloud-Native Architecture
 
-Vani relies on a robust real-time microservice architecture ensuring stability across massive outbound dial spikes.
+Vani AI is designed for horizontal scale across Railway (Backend) and Vercel (Frontend).
 
 ```mermaid
 graph TD;
-    A[Twilio Telephony] <--> |Voice WebSocket| B(Vani Core Engine)
-    B --> |Stream chunk 8KHz| C(Groq Whisper STT)
-    C --> |Intent Detection| D[Conversation Manager]
-    D --> |Prompt Engineering| E[OpenRouter/Groq LLM]
-    E --> |Synthesize Text| F(Sarvam TTS Engine)
-    F --> |µ-law + gain filtering| B
+    TW[Twilio Telephony] <--> |WebSocket| CM[Conversation Manager]
+    H[Hermes Agent] --> |Scrape News| BB[Browserbase]
+    CM --> |Prompt Building| PB[Prompt Builder]
+    PB --> |Inject Context| LLM[Groq / OpenRouter]
+    PB -.-> |Load Research| DB[(Supabase PG)]
+    LLM --> |Voice| TTS[Sarvam TTS]
+    TTS --> |Audio| CM
     
-    D -.-> |Call Logs| DB[(PostgreSQL)]
-    D -.-> |Job Submit| R[(Redis)]
-    R -.-> CEL[Celery Workers]
-    CEL -.-> |Analytics / CRM Update| DB
+    UI[React Dashboard] --> |Auth| SUPA[Supabase Auth]
+    UI --> |Manage Leads| API[FastAPI Web]
+    API --> |Queue Tasks| REDIS[(Redis)]
+    REDIS --> CEL[Celery Workers]
+    CEL --> |Research Lead| H
 ```
 
 ---
 
-## 🚀 Quickstart Guide
+## 🛠️ Deployment (Phase 7)
 
-### 1. Prerequisites
-Ensure you have the following installed on your machine:
-* **Python 3.10+**
-* **PostgreSQL** & **Redis** (Locally or via Docker)
-* **Ngrok** (For testing Twilio Webhooks natively)
+### 1. Backend (Railway)
+The backend is configured to run dual services from a single repository:
+*   **Web**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+*   **Worker**: `celery -A app.workers.celery_app worker --loglevel=info`
 
-### 2. Installation
-Clone the repository and spin up a secure virtual environment.
+### 2. Frontend (Vercel)
+The React/Vite frontend is optimized for Vercel:
+*   **Rewrites**: Configured in `vercel.json` for SPA routing.
+*   **API Connection**: Uses `VITE_API_URL` to securely talk to the Railway backend.
+
+### 3. Database (Supabase)
+*   **Auth**: Social & Email login managed via Supabase.
+*   **Schema**: Automated migrations via SQLAlchemy models in `app/models/core.py`.
+
+---
+
+## 📦 Getting Started
+
+### 1. Installation
 ```bash
-git clone https://github.com/adminforhtt/Outbound-Sales-Agent-VaniAI.git
-cd Outbound-Sales-Agent-VaniAI
-
-python -m venv venv
-source venv/bin/activate
+git clone https://github.com/adminforhtt/VaniAI-Outbound-Calls-Sales-Agent.git
+cd VaniAI-Outbound-Calls-Sales-Agent
 pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Copy the secure environment template:
-```bash
-cp .env.example .env
-```
-Populate your `.env` securely with your **Twilio**, **Sarvam AI**, and **OpenRouter / Groq** credentials. *Make sure to update `BASE_URL` with your active Ngrok endpoint!*
+### 2. Environment Setup
+Create a `.env` file with the following:
+```env
+# Twilio
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
 
-### 4. Running the Servers
+# AI & LLM
+SARVAM_API_KEY=
+OPENROUTER_API_KEY=
+GROQ_API_KEY=
 
-**Spin up Redis Queue Server:**
-```bash
-docker run -p 6379:6379 -d redis
-```
-
-**Launch the Vani API Core:**
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-**Expose Twilio Webhook (In a new terminal):**
-```bash
-ngrok http 8000
+# SaaS / Infra
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+DATABASE_URL=
+REDIS_URL=
+BROWSERBASE_API_KEY=
 ```
 
-**Start the Notification Celery Worker:**
+### 3. Development
 ```bash
-export $(cat .env | xargs)
+# Start Backend
+uvicorn app.main:app --reload
+
+# Start Frontend
+cd frontend && npm run dev
+
+# Start Worker
 celery -A app.workers.celery_app worker --loglevel=info
 ```
 
 ---
 
 ## 📚 API Reference
-
-Easily interact with the platform natively through our auto-generated Swagger UI interface. Once bounded locally via Uvicorn, visit:
-
-📍 **OpenAPI Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### Triggering a Test Call
-```bash
-curl -X 'POST' \
-  'http://localhost:8000/api/calls/test-call' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "phone_number": "+1234567890",
-  "script": "You are selling high level AI Architecture.",
-  "llm_provider": "groq",
-  "voice": "kavya",
-  "language": "hi-IN"
-}'
-```
+Access our interactive Swagger documentation at `BASE_URL/docs` once the server is running.
 
 ---
 
 <div align="center">
-  <b>Built with ❤️ for Intelligent AI Voice Pipelines.</b><br>
-  <i>Empowering Next Generation Call Centers globally.</i>
+  <b>Vani AI: Empowering the Next Generation of Intelligent Voice Pipelines.</b><br>
+  <i>Built for scale. Built for conversion.</i>
 </div>
