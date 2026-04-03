@@ -14,3 +14,4 @@ openai>=1.14.2
 mutagen>=1.47.0
 browserbase>=1.0.0
 razorpay>=1.4.1
+PyJWT==2.8.0
