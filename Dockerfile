@@ -15,8 +15,5 @@ RUN pip install --no-cache-dir PyJWT==2.8.0
 
 COPY . .
 
-# Expose port
-EXPOSE 8000
-
-# Start Uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway injects PORT at runtime — use shell form so $PORT is evaluated
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
