@@ -14,6 +14,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [reportModal, setReportModal] = useState<any>(null);
+  const [researchData, setResearchData] = useState<any>(null);
   const [showToast, setShowToast] = useState(false);
 
   // Agent config state
@@ -30,7 +31,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   // Quick test
   const [testPhone, setTestPhone] = useState('');
 
-  const API = 'http://localhost:8000/api';
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
   const fetchLeads = async () => {
     try {
@@ -135,6 +136,44 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       }
     } catch (e) { console.error(e); }
     setLoading(false);
+  };
+
+  const handleLaunchToCampaign = async () => {
+    if (!selectedCampaignId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/campaigns/${selectedCampaignId}/launch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        alert('Campaign Launch Successful! Hermes is now dialing all pending leads.');
+        fetchLeads();
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  const fetchResearch = async (leadId: number) => {
+    try {
+      const res = await fetch(`${API}/hermes/lead/${leadId}/research`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setResearchData(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const triggerResearch = async (leadId: number) => {
+    try {
+      const res = await fetch(`${API}/hermes/lead/${leadId}/research/trigger`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        alert("Hermes Agent has been dispatched to research this lead!");
+        fetchLeads();
+      }
+    } catch (e) { console.error(e); }
   };
 
   const downloadTranscript = () => {
@@ -378,6 +417,18 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
             >
               Upload & Process Leads
             </button>
+            
+            {/* Launch Campaign Button */}
+            {selectedCampaignId && (
+              <button 
+                className="btn-deploy" 
+                style={{ background: 'var(--accent-green)', marginTop: 'var(--space-md)' }}
+                onClick={handleLaunchToCampaign}
+                disabled={loading}
+              >
+                🚀 Launch Campaign (Start Dialing)
+              </button>
+            )}
           </div>
 
           {/* Progress Bars */}
@@ -426,10 +477,29 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <div className="call-item-right">
                       <span className="call-name">{lead.name === 'Test User' ? 'Quick Test' : lead.name}</span>
-                      <span className="call-status">
-                        <span className={`status-dot ${lead.status || 'pending'} ${lead.status === 'initiated' ? 'pulse' : ''}`}></span>
-                        {lead.status === 'initiated' ? 'in progress' : (lead.status || 'pending')}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        <span className="call-status">
+                          <span className={`status-dot ${lead.status || 'pending'} ${lead.status === 'initiated' ? 'pulse' : ''}`}></span>
+                          {lead.status === 'initiated' ? 'in progress' : (lead.status || 'pending')}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                          {(lead as any).enrichment_status === 'enriched' && (
+                            <span style={{ fontSize: '10px', color: '#4F46E5', fontWeight: 600 }}>✨ Enriched</span>
+                          )}
+                          {(lead as any).enrichment_status === 'pending' && (
+                            <span style={{ fontSize: '10px', color: '#9CA3AF' }}>Hermes: Prep...</span>
+                          )}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#6366F1' }}
+                            title="Ask Hermes to research"
+                          >
+                            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                      </div>
                     </div>
                     <button
                       className="call-action-btn"
@@ -472,12 +542,44 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                   <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   Export
                 </button>
-                <button className="icon-btn" onClick={() => setReportModal(null)}>
+                <button className="icon-btn" onClick={() => { setReportModal(null); setResearchData(null); }}>
                   <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
               </div>
             </div>
             <div className="modal-body hide-scrollbar">
+              {/* Add Research Preview Shortcut if available */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+                <button 
+                  onClick={() => fetchResearch(reportModal.lead_id)}
+                  style={{ 
+                    padding: '8px 16px', 
+                    borderRadius: '8px', 
+                    background: researchData ? '#EEF2FF' : '#F3F4F6', 
+                    border: researchData ? '1px solid #C7D2FE' : '1px solid #E5E7EB',
+                    color: researchData ? '#4F46E5' : '#4B5563',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {researchData ? '⚡ Hermes Research Active' : '🔍 Load Hermes Research'}
+                </button>
+              </div>
+
+              {researchData && (
+                <div style={{ background: '#F8FAFC', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)', marginBottom: 'var(--space-xl)', border: '1px solid #E2E8F0' }}>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <span style={{ fontSize: '16px' }}>✨</span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tailored Icebreaker</span>
+                   </div>
+                   <p style={{ fontSize: '15px', color: '#334155', fontWeight: 500, fontStyle: 'italic', marginBottom: '16px', borderLeft: '3px solid #6366F1', paddingLeft: '12px' }}>
+                     "{researchData.icebreaker}"
+                   </p>
+                   <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '4px' }}>HERMES SUMMARY:</div>
+                   <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>{researchData.research_summary}</p>
+                </div>
+              )}
               <div className="modal-stats-row">
                 <div className="modal-stat-box">
                   <div className="stat-label">Duration</div>

@@ -33,6 +33,7 @@ class CampaignResponse(CampaignBase):
 
 class LeadBase(BaseModel):
     name: str
+    company: Optional[str] = None
     phone: str
     language: str = "hi-IN"
     metadata_json: Optional[Dict[str, Any]] = {}
@@ -57,3 +58,16 @@ class ReportResponse(BaseModel):
     score: Optional[Dict[str, Any]] = None
     duration: int
     cost: float
+
+class UserBase(BaseModel):
+    email: str
+
+class UserCreate(UserBase):
+    password: str
+    company_name: str
+
+class UserResponse(UserBase):
+    id: int
+    tenant_id: int
+    role: str
+    model_config = ConfigDict(from_attributes=True)

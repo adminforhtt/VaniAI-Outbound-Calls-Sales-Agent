@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.config.database import Base, engine
-from app.api.endpoints import leads, campaigns, calls, reporting, auth, analytics
+from app.api.endpoints import leads, campaigns, calls, reporting, auth, analytics, billing, hermes
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +18,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], # Permissive for initial cloud sync, can restrict to specific app.vaniai.in later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,11 +30,19 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"]
 app.include_router(calls.router, prefix="/api/calls", tags=["Calls"])
 app.include_router(reporting.router, prefix="/api/reporting", tags=["Reporting"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
+app.include_router(hermes.router, prefix="/api/hermes", tags=["Hermes"])
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Starting up AI Outbound Calling System...")
+    logger.info(f"Starting up Vani AI for Production (Env: {settings.ENVIRONMENT})")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "environment": settings.ENVIRONMENT}
+    """Health check for Railway/AWS/Vercel deployments."""
+    return {
+        "status": "ok", 
+        "service": "vania-ai-backend",
+        "environment": settings.ENVIRONMENT,
+        "version": settings.VERSION
+    }

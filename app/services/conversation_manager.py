@@ -13,6 +13,13 @@ from app.config.database import SessionLocal
 from app.models.core import CallLog, Lead, Campaign
 from app.services.policy_engine import PolicyEngine
 from app.services.latency_controller import LatencyController
+from app.services.prompt_builder import (
+    build_call_prompt, 
+    LANGUAGE_NAMES, 
+    FEMALE_VOICES, 
+    detect_language_mismatch, 
+    fallback_response
+)
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +322,7 @@ class ConversationManager:
         self.campaign_name = "AI Assistant"  # Agent Title from campaign.name
         self.lead_name = "Customer"
         self.lead_phone = "Unknown"
+        self.lead_metadata = {}  # Hermes enrichment data
         self.has_greeted = False
         
         self.state = 'GREETING'
@@ -340,21 +348,41 @@ class ConversationManager:
         return b''
 
     async def _initialize_campaign_context(self):
-        """Fetch campaign details once at call start."""
+        """Fetch campaign details AND Hermes lead intelligence once at call start."""
         try:
             with SessionLocal() as db:
                 call_log = db.query(CallLog).filter(CallLog.call_sid == self.call_sid).first()
                 if call_log and call_log.lead_id:
                     lead = db.query(Lead).filter(Lead.id == call_log.lead_id).first()
-                    self.lead_name = lead.name if lead else "Customer"
-                    self.lead_phone = lead.phone if lead else "Unknown"
+                    if lead:
+                        self.lead_name = lead.name
+                        self.lead_phone = lead.phone
+                        self.language = lead.language or "hi-IN"  # Default to lead's specific lang
+                        
+                        # ── HERMES INTEGRATION: Load lead intelligence ──
+                        if lead.metadata_json:
+                            self.lead_metadata = lead.metadata_json
+                            logger.info(f"HERMES_LOADED: Lead {lead.id} has {len(json.dumps(self.lead_metadata))} bytes of intelligence")
+                        else:
+                            self.lead_metadata = {}
+                            logger.info(f"HERMES_EMPTY: Lead {lead.id} has no enrichment data")
+                    else:
+                        self.lead_name = "Customer"
+                        self.lead_phone = "Unknown"
+                        self.language = "hi-IN"
+                        self.lead_metadata = {}
+                        logger.info(f"HERMES_EMPTY: Lead {call_log.lead_id} not found")
+                    
                     if lead and lead.campaign_id:
                         campaign = db.query(Campaign).filter(Campaign.id == lead.campaign_id).first()
                         if campaign:
                             self.campaign_prompt = campaign.script_template or self.campaign_prompt
                             self.llm_provider = getattr(campaign, "llm_provider", "groq")
                             self.voice = getattr(campaign, "voice", "priya")
-                            self.language = getattr(campaign, "language", "hi-IN")
+                            # Only overwrite lead language if it's explicitly set in campaign and not in lead
+                            if not lead.language:
+                                self.language = getattr(campaign, "language", "hi-IN")
+                            
                             self.campaign_name = campaign.name or self.campaign_name
                             
                             from app.models.core import Tenant
@@ -621,12 +649,6 @@ class ConversationManager:
             history.append({"role": "user", "content": user_text})
             self.turn_count += 1
 
-            FEMALE_VOICES = {"priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
-                             "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
-                             "shruti", "suhani", "kavitha", "rupali", "female"}
-            agent_name = "Vani" if self.voice in FEMALE_VOICES else "Arjun"
-            lang_name = LANGUAGE_NAMES.get(self.language, "Hindi")
-
             # 7. AMBIGUITY HANDLING (context-aware with intent memory)
             is_ambig, ambig_resp = PolicyEngine.check_ambiguity(user_text, self.language, stage, self.intent_memory)
             if is_ambig:
@@ -640,60 +662,22 @@ class ConversationManager:
                 logger.info(f"Ambiguity detected. Skipping LLM.")
                 await self.latency_controller.on_llm_first_token()
             else:
-                # ── POLICY ENGINE: DYNAMIC SYSTEM PROMPT (with intent memory) ──
-                # Use strictly explicit Marathi Prompt Constraint provided by user
-                # Build first-turn introduction instruction if this is the user's first response
-                first_turn_instruction = ""
-                if self.turn_count == 1:
-                    first_turn_instruction = f"""
-FIRST TURN RULE (MANDATORY):
-This is the user's very first response after your greeting. You MUST start your reply by naturally introducing yourself:
-"Hi, I am {agent_name} calling from {self.company_name} regarding {self.campaign_name}."
-Translate this introduction naturally into {lang_name}. Then immediately follow with a discovery question. Keep total reply to 2 sentences.
-"""
+                # ── HERMES-POWERED SYSTEM PROMPT via prompt_builder ──
+                system_prompt_template = build_call_prompt(
+                    campaign_script=self.campaign_prompt,
+                    lead_metadata=self.lead_metadata,
+                    language=self.language,
+                    voice=self.voice,
+                    company_name=self.company_name,
+                    campaign_name=self.campaign_name,
+                    lead_name=self.lead_name,
+                    lead_phone=self.lead_phone,
+                    stage=stage,
+                    intent_memory=self.intent_memory,
+                    turn_count=self.turn_count,
+                )
 
-                system_prompt_template = f"""
-You are {agent_name}, a warm and professional AI voice assistant for {self.company_name}.
-You are on a live phone call with a real person right now.
-The user speaks {lang_name} ({self.language}) possibly mixed with Hindi or English words.
-
-CRITICAL VOICE RULES — follow these strictly:
-- NEVER begin any reply with "नमस्कार", "हॅलो", "नमस्ते" or any greeting. The greeting already happened.
-- NEVER say "मी उत्तर देण्याचा प्रयत्न करेन" or any filler phrase meaning "I will try to answer."
-- Keep every reply to a maximum of 2 sentences. This is a real phone call — people hang up if you talk too long.
-- NEVER repeat information you already gave in this conversation.
-- Always end your reply with ONE short direct question that moves the conversation forward.
-- Respond in clean, natural spoken {lang_name}. Accept Hinglish input but always reply in {lang_name}.
-- Do not use bullet points, numbered lists, or any formatting. Speak naturally.
-{first_turn_instruction}
-CAMPAIGN GOAL:
-{self.campaign_prompt}
-
-CONVERSATION STAGE — you are currently in: {stage}
-Advance through stages in this order:
-  GREETING (done) → DISCOVERY (learn the user's need) → PITCH (present solution) → OBJECTION (handle concerns) → CLOSE (get commitment) → DONE (end call warmly)
-
-Stage rules:
-- DISCOVERY: Ask 1-2 focused questions to understand what the user wants.
-- PITCH: Give the single best solution. One sentence. Then ask if it helps.
-- OBJECTION: Acknowledge concern briefly. Offer one reassurance. Ask if that helps.
-- CLOSE: Ask for a clear next step (e.g. "Shall I book an appointment for you?")
-- DONE: Thank them warmly in 1 sentence. Say goodbye. Nothing else.
-
-IMPORTANT — move to the next stage when:
-- DISCOVERY → PITCH: you know what the user needs (after 2-3 exchanges)
-- PITCH → OBJECTION: user expresses doubt or hesitation
-- PITCH → CLOSE: user responds positively
-- CLOSE → DONE: user says thank you, bye, or seems satisfied
-- Any stage → DONE: user says they want to end the call
-
-User context:
-- Name: {self.lead_name}
-- Phone: {self.lead_phone}
-- Previous intent keywords: {', '.join(self.intent_memory)}
-"""
                 recent_history = history[-5:]
-                # Inline manual override format required rather than abstract get_system_prompt
                 hist_str = ""
                 for msg in recent_history:
                     role_str = "User" if msg['role'] == "user" else "Agent"
@@ -703,15 +687,29 @@ User context:
 
                 valid_response = ""
                 max_attempts = 2
+                fallback_triggered = False
+                
+                logger.info(f"LANGUAGE_ENFORCED: {self.language}")
                 
                 for attempt in range(max_attempts):
                     if asyncio.current_task().cancelled():
                         return
                         
                     t0 = time.time()
-                    # 1. COMPLETENESS GUARANTEE (Synchronous await)
-                    raw_response = await LLMService.generate_response(messages, provider=self.llm_provider)
-                    
+                    try:
+                        # Wrap LLM call with a strict timeout
+                        raw_response = await asyncio.wait_for(
+                            LLMService.generate_response(messages, provider=self.llm_provider),
+                            timeout=3.5
+                        )
+                        response_time = time.time() - t0
+                        logger.info(f"LLM_RESPONSE_TIME: {response_time:.2f}s")
+                    except asyncio.TimeoutError:
+                        logger.warning("LLM TimeoutError: generation took too long.")
+                        valid_response = fallback_response(self.language)
+                        fallback_triggered = True
+                        break
+                        
                     # 9. LOGGING
                     logger.info(f"FULL_LLM_RESPONSE: {raw_response}")
                     
@@ -720,13 +718,22 @@ User context:
                     
                     is_valid, reason = PolicyEngine.validate_response(raw_response, user_text)
                     if is_valid:
+                        if detect_language_mismatch(raw_response, self.language):
+                            logger.warning(f"LANGUAGE MISMATCH DETECTED: Expected {self.language}")
+                            valid_response = fallback_response(self.language)
+                            fallback_triggered = True
+                            break
+
                         valid_response = raw_response
                         break
                     else:
                         logger.warning(f"Response rejected by PolicyEngine: {reason}. Regenerating...")
 
                 if not valid_response:
-                    valid_response = "जी..." if "IN" in self.language else "Yes..."
+                    valid_response = fallback_response(self.language)
+                    fallback_triggered = True
+                    
+                logger.info(f"FALLBACK_USED: {fallback_triggered}")
             
             # Apply strict limit
             valid_response = clean_llm_for_tts(valid_response, max_chars=250)

@@ -1,35 +1,49 @@
-import jwt
-from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from typing import Optional
-
-SECRET_KEY = "super-secret-sass-key"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
+from app.config.settings import settings
+from supabase import create_client, Client
+from sqlalchemy.orm import Session
+from app.config.database import get_db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+# Initialize Supabase Admin Client
+supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
-def decode_token(token: str):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Validates the Supabase JWT and fetches the corresponding Tenant ID from our database.
+    """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except jwt.PyJWTError:
-        return None
+        # Validate JWT via Supabase API
+        user_response = supabase.auth.get_user(token)
+        if not user_response.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        email = user_response.user.email
+        uuid = user_response.user.id
+        
+        # We allow /sync to pass without a tenant_id so it can create one
+        from app.models.core import User
+        db_user = db.query(User).filter(User.email == email).first()
+        
+        tenant_id = db_user.tenant_id if db_user else None
+            
+        return {
+            "sub": uuid, 
+            "email": email,
+            "tenant_id": tenant_id, 
+            "role": db_user.role if db_user else "user"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Could not validate credentials: {e}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    # Normally fetch user from DB here
-    return payload
+def get_auth_tenant(current_user: dict = Depends(get_current_user)) -> int:
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Not authorized or no tenant mapped. Try logging out and in again.")
+    return tenant_id

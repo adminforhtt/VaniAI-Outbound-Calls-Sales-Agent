@@ -1,40 +1,86 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
+import { supabase } from '../supabaseClient';
+
 function Login({ onLogin }: { onLogin: (token: string) => void }) {
-  const [email, setEmail] = useState('admin@test.com');
-  const [password, setPassword] = useState('password');
+  const [isSignup, setIsSignup] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/auth/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ username: email, password: password }),
-      });
+      if (isSignup) {
+        // 1. Supabase Signup natively
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        
+        if (error) throw error;
+        
+        // 2. Sync to backend to create Tenant & User tables
+        const API = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+        const sRes = await fetch(`${API}/auth/sync`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${data.session?.access_token}`
+          },
+          body: JSON.stringify({ email, company_name: companyName }),
+        });
+        
+        if (!sRes.ok) {
+          throw new Error('Supabase auth succeeded but tenant syncing failed.');
+        }
 
-      if (!response.ok) throw new Error('Invalid credentials');
-
-      const data = await response.json();
-      onLogin(data.access_token);
+        onLogin(data.session?.access_token || '');
+      } else {
+        // Log in via Supabase natively
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        
+        if (error) throw error;
+        onLogin(data.session?.access_token || '');
+      }
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="login-wrapper">
       <div className="login-card">
-        <h2>Welcome back</h2>
-        <p className="subtitle">Sign in to your Vani AI workspace</p>
+        <h2>{isSignup ? 'Create your account' : 'Welcome back'}</h2>
+        <p className="subtitle">{isSignup ? 'Start your autonomous outbound agency' : 'Sign in to your Vani AI workspace'}</p>
 
         {error && <div className="error-banner">{error}</div>}
 
         <form onSubmit={handleSubmit}>
+          {isSignup && (
+            <div className="form-group">
+              <label className="form-label">Company Name</label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                className="form-input"
+                placeholder="Acme Corp"
+                required
+              />
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Email address</label>
             <input
@@ -57,10 +103,20 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
               required
             />
           </div>
-          <button type="submit" className="btn-primary">
-            Sign in
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Processing...' : (isSignup ? 'Create Account' : 'Sign in')}
           </button>
         </form>
+
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px', color: '#6B7280' }}>
+          {isSignup ? "Already have an account?" : "New to Vani AI?"}{' '}
+          <button 
+            onClick={() => setIsSignup(!isSignup)}
+            style={{ color: '#6366F1', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {isSignup ? 'Log in' : 'Create one for free'}
+          </button>
+        </div>
       </div>
     </div>
   );

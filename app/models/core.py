@@ -40,11 +40,14 @@ class Lead(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     name = Column(String)
+    company = Column(String, nullable=True) # Added for CRM enrichment
     phone = Column(String, index=True)
     language = Column(String, default="hi-IN")
     metadata_json = Column(JSON, default={})
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=True)
     status = Column(String, default="pending") 
+    enrichment_status = Column(String, default="pending")  # pending | enriched | failed
+    enriched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class CallLog(Base):
@@ -62,3 +65,24 @@ class CallLog(Base):
     cost = Column(Float, default=0.0) # usage billing
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), unique=True)
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    plan = Column(String, default="free")      # free | starter | growth | enterprise
+    monthly_call_limit = Column(Integer, default=50)
+    calls_this_month = Column(Integer, default=0)
+    billing_cycle_start = Column(DateTime, server_default=func.now())
+
+class ScriptVersion(Base):
+    __tablename__ = "script_versions"
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"))
+    version = Column(Integer, default=1)
+    script_content = Column(Text)
+    reasoning = Column(Text, nullable=True)
+    performance_score = Column(Float, default=0.0)
+    created_at = Column(DateTime, server_default=func.now())

@@ -3,30 +3,96 @@ from fastapi.responses import HTMLResponse, Response, PlainTextResponse
 from sqlalchemy.orm import Session
 import logging
 import asyncio
+import time
 from pydantic import BaseModel
 from app.config.database import get_db
-from app.models.core import Lead, CallLog
+from app.models.core import Lead, CallLog, Campaign, Subscription
 from app.services.twilio_client import TwilioService
 from app.config.settings import settings
 from app.services.redis_store import redis_client
 from app.services.conversation_manager import ConversationManager
-from app.workers.celery_app import score_lead_task
+from app.workers.celery_app import score_lead_task, enrich_lead_task
+from app.services.security import get_auth_tenant
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+HERMES_WAIT_TIMEOUT = 10  # seconds to wait for Hermes enrichment before dialing
+
+def classify_interest(transcript: str) -> str:
+    """Simple heuristic to figure out lead interest based on full transcript."""
+    transcript_lower = transcript.lower()
+    if "yes " in transcript_lower or "interested" in transcript_lower or "ho" in transcript_lower or "हाँ" in transcript_lower:
+        return "high"
+    elif "not interested" in transcript_lower or "no " in transcript_lower or "nahi" in transcript_lower or "नहीं" in transcript_lower:
+        return "low"
+    else:
+        return "medium"
+
+def suggest_next_step(interest: str) -> str:
+    if interest == "high":
+        return "follow_up"
+    elif interest == "medium":
+        return "nurture"
+    else:
+        return "drop"
+
+def wait_for_hermes(lead_id: int, db: Session, timeout: int = HERMES_WAIT_TIMEOUT) -> bool:
+    """
+    Polls the database for up to `timeout` seconds waiting for Hermes to finish enrichment.
+    Returns True if enriched, False if timed out (call proceeds with generic script).
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        db.refresh(db.query(Lead).filter(Lead.id == lead_id).first())
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if lead and lead.enrichment_status == "enriched":
+            logger.info(f"HERMES_GATE: Lead {lead_id} enriched in {time.time() - start:.1f}s")
+            return True
+        time.sleep(1)
+    logger.warning(f"HERMES_GATE: Lead {lead_id} timed out after {timeout}s — proceeding with generic script")
+    return False
+
+def check_subscription_limit(db: Session, tenant_id: int):
+    """Checks if a tenant has remaining calls for the month."""
+    sub = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).first()
+    if not sub:
+        # Auto-create free tier for new tenants
+        sub = Subscription(tenant_id=tenant_id, plan="free", monthly_call_limit=50)
+        db.add(sub)
+        db.commit()
+    
+    if sub.calls_this_month >= sub.monthly_call_limit:
+        return False, sub
+    
+    sub.calls_this_month += 1
+    db.commit()
+    return True, sub
+
 @router.post("/initiate")
-def initiate_call(lead_id: int, db: Session = Depends(get_db)):
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.tenant_id == tenant_id).first()
     if not lead:
-        return {"error": "Lead not found"}
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # 1. Billing Gate
+    allowed, sub = check_subscription_limit(db, lead.tenant_id)
+    if not allowed:
+        raise HTTPException(status_code=402, detail=f"Monthly call limit reached ({sub.monthly_call_limit}). Please upgrade.")
+
+    # 2. Trigger Enrichment if not already done
+    if lead.enrichment_status == "pending":
+        enrich_lead_task.delay(lead.id)
+        # 3. HERMES GATE: Wait for enrichment before dialing
+        wait_for_hermes(lead.id, db)
 
     call_sid = TwilioService.initiate_call(
         to_number=lead.phone,
         url=f"{settings.BASE_URL}/api/calls/voice"
     )
 
-    call_log = CallLog(call_sid=call_sid, lead_id=lead_id, status="initiated")
+    call_log = CallLog(call_sid=call_sid, lead_id=lead_id, tenant_id=lead.tenant_id, status="initiated")
     db.add(call_log)
     db.commit()
 
@@ -40,14 +106,19 @@ class TestCallRequest(BaseModel):
     language: str = "hi-IN"
 
 @router.post("/test-call")
-def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db)):
+def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
+    
+    # Check limit
+    allowed, sub = check_subscription_limit(db, tenant_id)
+    if not allowed:
+        raise HTTPException(status_code=402, detail=f"Monthly call limit reached ({sub.monthly_call_limit}). Please upgrade.")
+
     # Create a dummy lead and campaign to track this test call
-    from app.models.core import Campaign
-    # Ensure a test campaign exists
-    campaign = db.query(Campaign).filter(Campaign.name == "Quick Test Campaign").first()
+    campaign = db.query(Campaign).filter(Campaign.name == "Quick Test Campaign", Campaign.tenant_id == tenant_id).first()
     if not campaign:
         campaign = Campaign(
             name="Quick Test Campaign", 
+            tenant_id=tenant_id,
             script_template=request.script,
             llm_provider=request.llm_provider,
             voice=request.voice,
@@ -62,16 +133,21 @@ def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db)):
         campaign.language = request.language
         db.commit()
 
-    lead = Lead(name="Test User", phone=request.phone_number, campaign_id=campaign.id, status="pending")
+    # Trigger enrichment before test call
+    lead = Lead(name="Test User", phone=request.phone_number, tenant_id=tenant_id, campaign_id=campaign.id, status="pending")
     db.add(lead)
     db.commit()
+    
+    enrich_lead_task.delay(lead.id)
+    # HERMES GATE: Wait for enrichment before dialing
+    wait_for_hermes(lead.id, db)
 
     call_sid = TwilioService.initiate_call(
         to_number=lead.phone,
         url=f"{settings.BASE_URL}/api/calls/voice"
     )
 
-    call_log = CallLog(call_sid=call_sid, lead_id=lead.id, status="initiated")
+    call_log = CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=tenant_id, status="initiated")
     db.add(call_log)
     db.commit()
 
@@ -145,6 +221,36 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
             transcript = "\n".join([f"{str(msg['role']).capitalize()}: {msg['content']}" for msg in history])
             call_log.transcript = transcript
             db.commit()
+            
+            # Predict outcome mathematically
+            interest = classify_interest(transcript)
+            next_action = suggest_next_step(interest)
+            
+            call_outcome = {
+                "call_sid": call_sid,
+                "lead_id": call_log.lead_id,
+                "status": status,
+                "duration": int(duration),
+                "transcript": transcript,
+                "lead_interest": interest,
+                "next_action": next_action,
+                "timestamp": str(datetime.utcnow())
+            }
+            logger.info(f"CALL_OUTCOME: {call_outcome}")
+            
+            # FUTURE-PROOFING: Store transcript in lead metadata for Hermes learning loop
+            if call_log.lead_id:
+                lead = db.query(Lead).filter(Lead.id == call_log.lead_id).first()
+                if lead:
+                    meta = lead.metadata_json or {}
+                    meta["last_transcript"] = transcript[:2000]  # Cap at 2000 chars
+                    meta["last_call_status"] = status
+                    meta["last_call_duration"] = int(duration)
+                    meta["lead_interest"] = interest
+                    meta["next_action"] = next_action
+                    lead.metadata_json = meta
+                    db.commit()
+                    logger.info(f"FUTURE_HOOK: Stored transcript for lead {lead.id} ({len(transcript)} chars)")
             
             # Queue background task for qualification
             background_tasks.add_task(score_lead_task.delay, call_sid, transcript)
