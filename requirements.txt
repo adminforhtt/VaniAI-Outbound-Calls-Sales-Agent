@@ -18,4 +18,3 @@ razorpay>=1.4.1
 PyJWT>=2.8.0
 supabase>=2.3.0
 passlib>=1.7.4
-audioop-lts>=0.2.1
