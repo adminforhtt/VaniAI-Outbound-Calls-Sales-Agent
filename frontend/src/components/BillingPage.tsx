@@ -139,7 +139,7 @@ function BillingPage({ token }: { token: string }) {
               style={{ 
                 width: '100%', 
                 padding: '12px', 
-                background: plan.id === current_plan_id ? '#CBD5E1' : '#4F46E5', 
+                background: plan.id === usage.plan ? '#CBD5E1' : '#4F46E5', 
                 color: 'white', 
                 borderRadius: '8px', 
                 fontWeight: 600, 
@@ -158,7 +158,5 @@ function BillingPage({ token }: { token: string }) {
     </div>
   );
 }
-
-const current_plan_id = "free"; // Simulation helper
 
 export default BillingPage;

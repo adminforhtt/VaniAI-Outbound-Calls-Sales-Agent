@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.core import Subscription, Tenant
 from app.config.settings import settings
+from app.services.security import get_auth_tenant
 import razorpay
 import logging
 
@@ -24,9 +25,7 @@ def get_plans():
     return PLANS
 
 @router.get("/usage")
-def get_usage(db: Session = Depends(get_db)):
-    # Assuming tenant_id = 1 for mock
-    tenant_id = 1
+def get_usage(db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
     sub = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).first()
     if not sub:
         sub = Subscription(tenant_id=tenant_id, plan="free", monthly_call_limit=50)
@@ -42,7 +41,7 @@ def get_usage(db: Session = Depends(get_db)):
     }
 
 @router.post("/checkout")
-async def create_checkout_session(plan: str, db: Session = Depends(get_db)):
+async def create_checkout_session(plan: str, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
     if plan not in PLANS or plan == "free":
         raise HTTPException(status_code=400, detail="Invalid plan selected")
     
@@ -55,10 +54,10 @@ async def create_checkout_session(plan: str, db: Session = Depends(get_db)):
         order = razorpay_client.order.create({
             "amount": PLANS[plan]["price"],
             "currency": "INR",
-            "receipt": f"receipt_{plan}_{1}", # tenant=1
+            "receipt": f"receipt_{plan}_{tenant_id}", 
             "notes": {
                 "plan": plan,
-                "tenant_id": 1
+                "tenant_id": tenant_id
             }
         })
         logger.info(f"Created Razorpay order: {order['id']}")
