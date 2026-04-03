@@ -13,5 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Install Hermes internal dependencies to satisfy run_agent.py
+RUN pip install --no-cache-dir -r libs/hermes/requirements.txt
+
 # Railway injects PORT at runtime — use shell form so $PORT is evaluated
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
