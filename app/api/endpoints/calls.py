@@ -87,9 +87,10 @@ def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = 
         # 3. HERMES GATE: Wait for enrichment before dialing
         wait_for_hermes(lead.id, db)
 
+    base_url = settings.BASE_URL.rstrip('/')
     call_sid = TwilioService.initiate_call(
         to_number=lead.phone,
-        url=f"{settings.BASE_URL}/api/calls/voice"
+        url=f"{base_url}/api/calls/voice"
     )
 
     call_log = CallLog(call_sid=call_sid, lead_id=lead_id, tenant_id=lead.tenant_id, status="initiated")
@@ -142,9 +143,10 @@ def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), 
     # HERMES GATE: Wait for enrichment before dialing
     wait_for_hermes(lead.id, db)
 
+    base_url = settings.BASE_URL.rstrip('/')
     call_sid = TwilioService.initiate_call(
         to_number=lead.phone,
-        url=f"{settings.BASE_URL}/api/calls/voice"
+        url=f"{base_url}/api/calls/voice"
     )
 
     call_log = CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=tenant_id, status="initiated")
@@ -164,7 +166,8 @@ async def voice_webhook(request: Request):
     # Initialize session and state
     await redis_client.save_session(call_sid, {"history": [], "state": "INIT"})
 
-    ws_url = settings.BASE_URL.replace("https://", "wss://").replace("http://", "ws://") + f"/api/calls/stream/{call_sid}"
+    base_url = settings.BASE_URL.rstrip('/')
+    ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://") + f"/api/calls/stream/{call_sid}"
     
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
     <Response>

@@ -10,12 +10,13 @@ class TwilioService:
         Initiates an outbound call using Twilio.
         The url should point to the /call/voice webhook which provides initial TwiML.
         """
+        base_url = settings.BASE_URL.rstrip('/')
         call = twilio_client.calls.create(
             to=to_number,
             from_=settings.TWILIO_PHONE_NUMBER,
             url=url,
             record=True,
-            status_callback=f"{settings.BASE_URL}/api/calls/status",
+            status_callback=f"{base_url}/api/calls/status",
             status_callback_event=["initiated", "ringing", "answered", "completed"]
         )
         return call.sid
