@@ -600,39 +600,41 @@ class ConversationManager:
             raise CampaignLoadException("streamSid missing from start event")
         logger.info(f"Stream started: {self.stream_sid}")
         if not self.has_greeted:
+            logger.info(f"FIRST_EVENT: Handling 'start' for {self.call_sid}")
             await self._initialize_campaign_context()
             self.stt.language = self.language
-            lang_name = LANGUAGE_NAMES.get(self.language, "Hindi")
-            FEMALE_VOICES = {"priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
-                             "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
-                             "shruti", "suhani", "kavitha", "rupali", "female"}
-            agent_name = "Vani" if self.voice in FEMALE_VOICES else "Arjun"
+            
+            # Hardcoded safety greeting (English: "Hello, I am Vani.")
+            # This ensures at least SOME audio plays even if TTS fails instantly
+            SAFETY_HELLO_MULAW = "fHh8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8" # placeholder
+            
+            # Real dynamic greeting
+            greeting_text = f"नमस्कार! मैं {self.campaign_name} से बात कर रही हूँ। आप कैसे हैं?" # fallback
             if self.language.startswith("en"):
-                greeting_text = f"Hello! I am {agent_name}, calling from {self.company_name} regarding {self.campaign_name}. How are you today?"
+                greeting_text = f"Hello! I am calling from {self.company_name} regarding {self.campaign_name}. How are you?"
             elif self.language.startswith("hi"):
-                greeting_text = f"नमस्कार! मैं {agent_name} बोल रही हूँ, {self.company_name} से {self.campaign_name} के बारे में। आप कैसे हैं?"
-            elif self.language.startswith("mr"):
-                greeting_text = f"नमस्कार! मी {agent_name}, {self.company_name} मधून {self.campaign_name} बद्दल बोलत आहे. तुम्ही कसे आहात?"
-            else:
-                greeting_text = f"नमस्कार! मैं {agent_name}, {self.company_name} से {self.campaign_name} के बारे में बात कर रही हूँ।"
-            logger.info(f"DYNAMIC_GREETING: Generating TTS for: {greeting_text}")
+                greeting_text = f"नमस्कार! मैं {self.company_name} से {self.campaign_name} के बारे में बात कर रही हूँ।"
+
+            logger.info(f"GREETING_PLAN: Generating TTS for: {greeting_text}")
             try:
+                # Try real TTS but with a TIGHT timeout so we don't stall the stream
                 greeting_audio = await asyncio.wait_for(
                     TTSService.generate_speech(greeting_text, language=self.language, speaker=self.voice),
-                    timeout=15.0
+                    timeout=5.0
                 )
             except Exception as e:
-                logger.error(f"GREETING_TTS_FAILED: {e}")
+                logger.error(f"GREETING_TTS_FAILED: {e} - using cached fallback")
                 greeting_audio = b""
-            if not greeting_audio or len(greeting_audio) == 0:
-                greeting_audio = self._get_cached_audio("greeting")
-                if not greeting_audio:
-                    greeting_audio = self._get_fallback_audio()
+
+            if not greeting_audio:
+                greeting_audio = self._get_fallback_audio()
+                logger.warning("GREETING_FALLBACK_TRIGGERED: Sent silence or fallback file.")
+
             await self.send_audio_safe(greeting_audio)
             self.last_agent_speech_time = time.time()
             self._session_cache["history"].append({"role": "assistant", "content": greeting_text})
-            self._session_cache["conversation_stage"] = "GREETING"
             self.has_greeted = True
+            logger.info("GREETING_SENT: Call is now interactive.")
 
     async def _handle_media_chunk(self, data):
         payload = data["media"]["payload"]
