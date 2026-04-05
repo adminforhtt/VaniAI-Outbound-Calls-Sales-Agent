@@ -119,7 +119,7 @@ class TestCallRequest(BaseModel):
     language: str = "hi-IN"
 
 @router.post("/test-call")
-def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
+def initiate_test_call(request: TestCallRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
     
     # Check limit
     allowed, sub = check_subscription_limit(db, tenant_id)
@@ -151,13 +151,16 @@ def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), 
     db.add(lead)
     db.commit()
     
-    # Trigger enrichment (non-blocking — call always proceeds even if Celery/Redis is down)
-    try:
-        from app.workers.celery_app import enrich_lead_task
-        enrich_lead_task.delay(lead.id)
-        wait_for_hermes(lead.id, db)
-    except Exception as e:
-        logger.warning(f"Enrichment skipped for test call (Celery/Redis unavailable): {e}")
+    # Trigger enrichment asynchronously via FastAPI background task 
+    # to completely eliminate the risk of Celery/Redis blocking the main API thread
+    def _trigger_enrichment(lead_id):
+        try:
+            from app.workers.celery_app import enrich_lead_task
+            enrich_lead_task.delay(lead_id)
+        except Exception as e:
+            logger.warning(f"Background enrichment failed: {e}")
+            
+    background_tasks.add_task(_trigger_enrichment, lead.id)
 
     base_url = settings.BASE_URL.rstrip('/')
     try:

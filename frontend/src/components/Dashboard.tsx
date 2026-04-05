@@ -108,9 +108,9 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         const err = await res.json();
         alert(`Call failed: ${err.detail || 'Unknown error'}`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert('Network error while initiating call.');
+      alert(`Network/Parse Error: ${e.message || 'Unknown network error'}`);
     }
     setLoading(false);
   };
