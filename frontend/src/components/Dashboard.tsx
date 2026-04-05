@@ -103,6 +103,19 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
     setLoading(false);
   };
 
+  const downloadTranscript = (leadName: string, transcript: string) => {
+    if (!transcript) return;
+    const blob = new Blob([transcript], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `VaniAI_Transcript_${leadName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const viewReport = async (leadId: number, callSid: string) => {
     try {
       const res = await fetch(`${API}/reporting/summary/${leadId}`, {
@@ -534,16 +547,20 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <p className="modal-sub">Conversation Analysis</p>
+                <div className="modal-sub">Call Insight</div>
                 <h3>{reportModal.phone}</h3>
               </div>
               <div className="modal-header-actions">
-                <button className="btn-export" onClick={downloadTranscript}>
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                  Export
+                <button className="btn-export" onClick={() => downloadTranscript(reportModal.phone, reportModal.transcript)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                  Export Transcript
                 </button>
                 <button className="icon-btn" onClick={() => { setReportModal(null); setResearchData(null); }}>
-                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -591,6 +608,12 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                     <div className="stat-value">{reportModal.outcome}</div>
                   </div>
                 )}
+                {reportModal.score && (
+                  <div className="modal-stat-box" style={{ background: '#EEF2FF', gridColumn: 'span 2' }}>
+                    <div className="stat-label" style={{ color: '#4F46E5' }}>Hermes Win Probability</div>
+                    <div className="stat-value" style={{ color: '#4338CA' }}>{reportModal.score.score}/100</div>
+                  </div>
+                )}
               </div>
 
               {reportModal.score && (
@@ -600,14 +623,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                 </div>
               )}
 
-              {reportModal.transcript && (
-                <div style={{ background: '#F1F5F9', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)', marginBottom: 'var(--space-xl)', border: '1px solid #E2E8F0' }}>
-                  <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: '#475569', textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: '12px' }}>Call Transcript</div>
-                  <div style={{ fontSize: 'var(--font-size-sm)', color: '#334155', lineHeight: 1.6, maxHeight: '300px', overflowY: 'auto', whiteSpace: 'pre-wrap', background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #CBD5E1' }}>
-                    {reportModal.transcript}
-                  </div>
-                </div>
-              )}
 
               <div className="transcript-section">
                 <h4>Transcript</h4>

@@ -1115,88 +1115,97 @@ input, textarea, select {
 }
 
 .side-nav {
-  width: 260px;
-  background: #F9FAFB;
-  border-right: 1px solid #F0F3F8;
+  width: 240px;
+  background: #FFFFFF;
+  border-right: 1px solid #F1F5F9;
   display: flex;
   flex-direction: column;
   padding: var(--space-xl) var(--space-md);
   flex-shrink: 0;
+  z-index: 50;
 }
 
 .nav-logo {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--accent-blue);
-  margin-bottom: 48px;
+  font-size: 1.4rem;
+  font-weight: 850;
+  color: var(--text-primary);
+  margin-bottom: 40px;
   padding-left: var(--space-md);
   cursor: pointer;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-logo::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: var(--accent-blue);
+  border-radius: 3px;
+  display: inline-block;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: #64748B;
   font-weight: 600;
-  font-size: var(--font-size-base);
+  font-size: 0.9rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
-  margin-bottom: 4px;
+  transition: all var(--transition-base);
+  margin-bottom: 6px;
 }
 
 .nav-item:hover {
-  background: #F3F4F6;
+  background: #F8FAFC;
   color: var(--text-primary);
+  transform: translateX(4px);
 }
 
 .nav-item.active {
-  background: white;
+  background: var(--surface-muted);
   color: var(--accent-blue);
-  box-shadow: 0 4px 12px rgba(79, 156, 247, 0.1);
 }
 
 .nav-item svg {
-  width: 20px;
-  height: 20px;
-  opacity: 0.7;
-}
-
-.nav-item.active svg {
-  opacity: 1;
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
 }
 
 .nav-bottom {
   margin-top: auto;
-  padding-top: var(--space-xl);
-  border-top: 1px solid #F0F3F8;
+  padding-top: var(--space-lg);
 }
 
 .logout-btn {
   width: 100%;
-  padding: 12px;
+  padding: 10px 16px;
   text-align: left;
-  color: var(--accent-coral);
+  color: #94A3B8;
   font-weight: 600;
-  font-size: var(--font-size-sm);
+  font-size: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 8px;
-  opacity: 0.8;
-  transition: opacity 0.2s;
+  gap: 10px;
+  transition: all 0.2s;
+  border-radius: 8px;
 }
 
 .logout-btn:hover {
-  opacity: 1;
+  color: var(--accent-coral);
+  background: #FFF1F2;
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
-  background: white;
+  background: #F8FAFC;
   display: flex;
   flex-direction: column;
 }

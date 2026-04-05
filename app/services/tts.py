@@ -205,7 +205,7 @@ class TTSService:
             "inputs": [processed_text],
             "target_language_code": language,
             "speaker": VOICE_MAP.get(speaker.lower(), "anand"),
-            "pace": 1.0,  # Relaxed conversational speed for more natural human emotion
+            "pace": 1.15,  # Slightly faster conversational speed to prevent 'sleepy' feeling & reduce response latency
             "speech_sample_rate": 8000,
             "enable_preprocessing": True,
             "model": "bulbul:v3"
