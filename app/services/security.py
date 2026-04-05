@@ -4,6 +4,9 @@ from app.config.settings import settings
 from supabase import create_client, Client
 from sqlalchemy.orm import Session
 from app.config.database import get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
