@@ -11,7 +11,6 @@ from app.services.twilio_client import TwilioService
 from app.config.settings import settings
 from app.services.redis_store import redis_client
 from app.services.conversation_manager import ConversationManager
-from app.workers.celery_app import score_lead_task, enrich_lead_task
 from app.services.security import get_auth_tenant
 from datetime import datetime
 
@@ -87,11 +86,14 @@ def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = 
     if not allowed:
         raise HTTPException(status_code=402, detail=f"Monthly call limit reached ({sub.monthly_call_limit}). Please upgrade.")
 
-    # 2. Trigger Enrichment if not already done
+    # 2. Trigger Enrichment if not already done (non-blocking — call always proceeds)
     if lead.enrichment_status == "pending":
-        enrich_lead_task.delay(lead.id)
-        # 3. HERMES GATE: Wait for enrichment before dialing
-        wait_for_hermes(lead.id, db)
+        try:
+            from app.workers.celery_app import enrich_lead_task
+            enrich_lead_task.delay(lead.id)
+            wait_for_hermes(lead.id, db)
+        except Exception as e:
+            logger.warning(f"Enrichment skipped (Celery/Redis unavailable): {e}")
 
     base_url = settings.BASE_URL.rstrip('/')
     call_sid = TwilioService.initiate_call(
@@ -140,14 +142,18 @@ def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), 
         campaign.language = request.language
         db.commit()
 
-    # Trigger enrichment before test call
+    # Create lead for tracking
     lead = Lead(name="Test User", phone=request.phone_number, tenant_id=tenant_id, campaign_id=campaign.id, status="pending")
     db.add(lead)
     db.commit()
     
-    enrich_lead_task.delay(lead.id)
-    # HERMES GATE: Wait for enrichment before dialing
-    wait_for_hermes(lead.id, db)
+    # Trigger enrichment (non-blocking — call always proceeds even if Celery/Redis is down)
+    try:
+        from app.workers.celery_app import enrich_lead_task
+        enrich_lead_task.delay(lead.id)
+        wait_for_hermes(lead.id, db)
+    except Exception as e:
+        logger.warning(f"Enrichment skipped for test call (Celery/Redis unavailable): {e}")
 
     base_url = settings.BASE_URL.rstrip('/')
     call_sid = TwilioService.initiate_call(
@@ -261,8 +267,12 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
                     db.commit()
                     logger.info(f"FUTURE_HOOK: Stored transcript for lead {lead.id} ({len(transcript)} chars)")
             
-            # Queue background task for qualification
-            background_tasks.add_task(score_lead_task.delay, call_sid, transcript)
+            # Queue background task for qualification (non-fatal if Celery is down)
+            try:
+                from app.workers.celery_app import score_lead_task
+                background_tasks.add_task(score_lead_task.delay, call_sid, transcript)
+            except Exception as e:
+                logger.warning(f"Lead scoring skipped (Celery/Redis unavailable): {e}")
             
     return {"status": "ok"}
 
