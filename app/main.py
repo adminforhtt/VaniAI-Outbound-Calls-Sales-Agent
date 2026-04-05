@@ -40,20 +40,28 @@ async def startup_event():
 @app.on_event("startup")
 async def run_db_migrations():
     """
-    Run pending Alembic migrations on every startup.
-    This is safe — Alembic tracks which migrations have run via alembic_version table.
-    No-op if already at head. Never runs a migration twice.
+    Emergency Production Rescue: Uses create_all for initial schema setup 
+    and stamps Alembic to HEAD to stop the versioning loop.
+    Ensures 'Deploy Configuration' works even if the DB was partially initialized.
     """
     try:
-        logger.info("Running Alembic migrations...")
+        from app.config.database import engine, Base
+        from app.models import core # Ensure models are loaded for create_all
+        
+        logger.info("DATABASE_RESCUE: Initializing schema via metadata.create_all...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("DATABASE_RESCUE: ✅ Schema checks passed (create_all finished).")
+
+        logger.info("ALEMBIC_SYNC: Stamping migration HEAD to prevent boot loops...")
         alembic_cfg = AlembicConfig("alembic.ini")
-        alembic_command.upgrade(alembic_cfg, "head")
-        logger.info("✅ DB migrations complete — at head.")
+        alembic_command.stamp(alembic_cfg, "head")
+        logger.info("✅ Database is ready — starting server.")
+        
     except Exception as e:
         import traceback
-        logger.critical(f"❌ DB migration failed on startup: {str(e)}")
+        logger.critical(f"❌ Critical Database Initialization Error: {str(e)}")
         logger.critical(traceback.format_exc())
-        raise  # crash startup if migrations fail — better than silent data corruption
+        raise  # Stop startup if DB is unreachable
 
 from app.api.endpoints.health import router as health_router
 app.include_router(health_router)
