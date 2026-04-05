@@ -125,5 +125,43 @@ def enrich_lead_task(self, lead_id: str, campaign_id: str) -> dict:
     queue="default",
 )
 def celery_health_check(self) -> dict:
-    """Lightweight task to verify Celery worker is alive. Called by /health endpoint."""
     return {"status": "alive", "worker_id": self.request.hostname}
+
+@celery_app.task(
+    base=BaseVaniTask,
+    bind=True,
+    name="vani_ai.run_campaign_task",
+    queue="default"
+)
+def run_campaign_task(self, campaign_id: int):
+    logger.info(f"Starting bulk dial for campaign {campaign_id}")
+    try:
+        from app.db.session import get_db
+        session = next(get_db())
+    except ImportError:
+        from app.models.core import SessionLocal
+        session = SessionLocal()
+
+    from app.models.core import Lead, CallLog
+    from app.services.twilio_client import TwilioService
+    from app.config.settings import settings
+    import time
+    
+    leads = session.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == 'pending').all()
+    base_url = settings.BASE_URL.rstrip('/')
+    url = f"{base_url}/api/calls/voice"
+
+    for lead in leads:
+        try:
+            call_sid = TwilioService.initiate_call(to_number=lead.phone, url=url)
+            lead.status = "initiated"
+            call_log = CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=lead.tenant_id, status="initiated")
+            session.add(call_log)
+        except Exception as e:
+            logger.error(f"Failed to dial {lead.phone}: {e}")
+            lead.status = "failed"
+        session.commit()
+        time.sleep(1) # pacing
+        
+    session.close()
+    return {"status": "success", "campaign": campaign_id, "leads_dialed": len(leads)}

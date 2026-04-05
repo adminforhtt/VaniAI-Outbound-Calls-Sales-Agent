@@ -63,7 +63,14 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
 
   const handleDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!campaignName || !script) return;
+    if (!campaignName || !campaignName.trim()) {
+      showToast('Please provide a campaign name.', 'error');
+      return;
+    }
+    if (!script || !script.trim()) {
+      showToast('Please provide a campaign script.', 'error');
+      return;
+    }
     setLoading(true);
     try {
       await fetch(`${API}/campaigns/`, {
