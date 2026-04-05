@@ -801,8 +801,8 @@ class ConversationManager:
         logger.info("AUDIO_SENT")
         
     async def _stream_audio_to_twilio(self, audio_bytes: bytes):
-        """Stream mu-law audio bytes to Twilio in exactly 160-byte chunks (20ms) perfectly synced with Twilio's jitter buffer."""
-        chunk_size = 160
+        """Stream mu-law audio bytes to Twilio in 320-byte chunks (40ms) for enhanced jitter stability."""
+        chunk_size = 320
         for i in range(0, len(audio_bytes), chunk_size):
             if asyncio.current_task().cancelled():
                 raise asyncio.CancelledError()
@@ -814,7 +814,8 @@ class ConversationManager:
                 "media": {"payload": payload}
             }
             await self.websocket.send_text(json.dumps(msg))
-            await asyncio.sleep(0.018)  # 18ms pacing to prevent Twilio buffer overrun
+            await asyncio.sleep(0.038)  # 38ms pacing for 40ms audio chunks
+
 
     async def _generate_and_speak(self, user_text: str):
         turn_start = time.time()
