@@ -635,12 +635,25 @@ class ConversationManager:
             await self._initialize_campaign_context()
             self.stt.language = self.language
             
-            # 3. Dynamic Greeting
-            greeting_text = f"नमस्कार! मैं {self.campaign_name} से बात कर रही हूँ।" 
-            if self.language.startswith("en"):
-                greeting_text = f"Hello! I am calling from {self.company_name} regarding {self.campaign_name}."
+            # 3. Dynamic Multi-Lingual Greeting Fallback
+            GREETINGS_BY_LANG = {
+                "hi-IN": f"नमस्कार! मैं {self.campaign_name} से {self.company_name} के लिए बात कर रही हूँ।",
+                "en-IN": f"Hello! I am {self.campaign_name}, calling from {self.company_name}.",
+                "mr-IN": f"नमस्कार! मी {self.campaign_name}, {self.company_name} मधून बोलत आहे.",
+                "bn-IN": f"নমস্কার! আমি {self.campaign_name}, {self.company_name} থেকে কথা বলছি।",
+                "ta-IN": f"வணக்கம்! நான் {self.campaign_name}, {self.company_name} லிருந்து அழைக்கிறேன்.",
+                "te-IN": f"నమస్కారం! నేను {self.campaign_name}, {self.company_name} నుండి మాట్లాడుతున్నాను.",
+                "kn-IN": f"ನಮಸ್ಕಾರ! ನಾನು {self.campaign_name}, {self.company_name} ನಿಂದ ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ.",
+                "gu-IN": f"નમસ્તે! હું {self.campaign_name}, {self.company_name} માંથી બોલું છું.",
+                "ml-IN": f"നമസ്കാരം! ഞാൻ {self.campaign_name}, {self.company_name}ൽ നിന്നാണ് വിളിക്കുന്നത്.",
+                "pa-IN": f"ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ {self.campaign_name}, {self.company_name} ਤੋਂ ਗੱਲ ਕਰ ਰਿਹਾ ਹਾਂ।",
+                "or-IN": f"ନମସ୍କାର! ମୁଁ {self.campaign_name}, {self.company_name} ରୁ କଥା କହୁଛି।",
+            }
+            
+            greeting_text = GREETINGS_BY_LANG.get(self.language) or GREETINGS_BY_LANG["hi-IN"]
                 
-            logger.info(f"GREETING_PLAN: Generating TTS for: {greeting_text}")
+            logger.info(f"GREETING_PLAN: Generating TTS for: {greeting_text} (Lang: {self.language})")
+
             try:
                 # Try real TTS but with a TIGHT timeout
                 greeting_audio = await asyncio.wait_for(
