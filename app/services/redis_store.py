@@ -6,12 +6,12 @@ from app.config.settings import settings
 class RedisStore:
     def __init__(self):
         import redis.asyncio as redis_async
-        # Hardened for Production: Disable SSL cert validation if using rediss:// in Railway/Cloud
-        self.redis = redis_async.from_url(
-            settings.REDIS_URL, 
-            decode_responses=True,
-            ssl_cert_reqs=None
-        )
+        # Hardened for Production: Only apply SSL settings if using rediss://
+        kwargs = {"decode_responses": True}
+        if settings.REDIS_URL.startswith("rediss://"):
+            kwargs["ssl_cert_reqs"] = None
+            
+        self.redis = redis_async.from_url(settings.REDIS_URL, **kwargs)
 
     async def get_session(self, call_sid: str) -> Dict[str, Any]:
         data = await self.redis.get(f"session:{call_sid}")
