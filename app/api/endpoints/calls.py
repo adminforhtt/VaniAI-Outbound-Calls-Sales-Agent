@@ -96,10 +96,14 @@ def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = 
             logger.warning(f"Enrichment skipped (Celery/Redis unavailable): {e}")
 
     base_url = settings.BASE_URL.rstrip('/')
-    call_sid = TwilioService.initiate_call(
-        to_number=lead.phone,
-        url=f"{base_url}/api/calls/voice"
-    )
+    try:
+        call_sid = TwilioService.initiate_call(
+            to_number=lead.phone,
+            url=f"{base_url}/api/calls/voice"
+        )
+    except Exception as e:
+        logger.error(f"Twilio initiation failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Twilio Error: {str(e)}")
 
     call_log = CallLog(call_sid=call_sid, lead_id=lead_id, tenant_id=lead.tenant_id, status="initiated")
     db.add(call_log)
@@ -156,10 +160,17 @@ def initiate_test_call(request: TestCallRequest, db: Session = Depends(get_db), 
         logger.warning(f"Enrichment skipped for test call (Celery/Redis unavailable): {e}")
 
     base_url = settings.BASE_URL.rstrip('/')
-    call_sid = TwilioService.initiate_call(
-        to_number=lead.phone,
-        url=f"{base_url}/api/calls/voice"
-    )
+    try:
+        call_sid = TwilioService.initiate_call(
+            to_number=lead.phone,
+            url=f"{base_url}/api/calls/voice"
+        )
+    except Exception as e:
+        logger.error(f"Twilio initiation failed: {e}")
+        # Mark as failed
+        lead.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=400, detail=f"Twilio Error: {str(e)}")
 
     call_log = CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=tenant_id, status="initiated")
     db.add(call_log)

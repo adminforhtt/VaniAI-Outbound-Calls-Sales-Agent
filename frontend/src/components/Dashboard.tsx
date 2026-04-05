@@ -104,8 +104,14 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       if (res.ok) {
         setTestPhone('');
         fetchLeads();
+      } else {
+        const err = await res.json();
+        alert(`Call failed: ${err.detail || 'Unknown error'}`);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      alert('Network error while initiating call.');
+    }
     setLoading(false);
   };
 
