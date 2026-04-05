@@ -600,6 +600,15 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                 </div>
               )}
 
+              {reportModal.transcript && (
+                <div style={{ background: '#F1F5F9', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)', marginBottom: 'var(--space-xl)', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: '#475569', textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: '12px' }}>Call Transcript</div>
+                  <div style={{ fontSize: 'var(--font-size-sm)', color: '#334155', lineHeight: 1.6, maxHeight: '300px', overflowY: 'auto', whiteSpace: 'pre-wrap', background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #CBD5E1' }}>
+                    {reportModal.transcript}
+                  </div>
+                </div>
+              )}
+
               <div className="transcript-section">
                 <h4>Transcript</h4>
                 <div className="transcript-bubbles">
