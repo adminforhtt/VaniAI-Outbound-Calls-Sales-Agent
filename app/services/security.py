@@ -14,6 +14,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     """
     Validates the Supabase JWT and fetches the corresponding Tenant ID from our database.
     """
+    if settings.BYPASS_AUTH:
+        logger.warning("⚠️ SECURITY_WARNING: AUTH BYPASS IS ENABLED! Returning dummy demo user.")
+        from app.models.core import User
+        # Try to find the first admin user in the DB to represent the demo
+        admin = db.query(User).filter(User.role == "admin").first()
+        return {
+            "sub": "demo-uuid",
+            "email": admin.email if admin else "demo@vani.ai",
+            "tenant_id": admin.tenant_id if admin else 1,
+            "role": "admin"
+        }
+
     try:
         # Validate JWT via Supabase API
         user_response = supabase.auth.get_user(token)
@@ -36,9 +48,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             "role": db_user.role if db_user else "user"
         }
     except Exception as e:
+        logger.error(f"AUTH_FAILURE: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {e}",
+            detail=f"Could not validate credentials: {e}. Try logging out and in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
