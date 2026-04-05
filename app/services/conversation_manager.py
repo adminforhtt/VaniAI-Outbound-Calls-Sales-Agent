@@ -413,6 +413,19 @@ FILLER_PHRASES = {
 }
 
 
+def normalize_language_code(lang: str) -> str:
+    """Normalizes human names like 'Marathi' or 'Bangla' to BCP-47 codes."""
+    if not lang: return "hi-IN"
+    
+    mapping = {
+        "hindi": "hi-IN", "english": "en-IN", "marathi": "mr-IN",
+        "bengali": "bn-IN", "bangla": "bn-IN", "tamil": "ta-IN",
+        "telugu": "te-IN", "kannada": "kn-IN", "gujarati": "gu-IN",
+        "malayalam": "ml-IN", "punjabi": "pa-IN", "odia": "or-IN", "oriya": "or-IN"
+    }
+    cleaned = lang.lower().strip()
+    return mapping.get(cleaned, lang)
+
 class ConversationManager:
     """
     Ultra-low-latency conversation pipeline with optimizations:
