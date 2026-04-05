@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.config.database import get_db
 from app.models.core import Campaign
-from app.schemas.core import CampaignCreate, CampaignResponse
+from app.schemas.core import CampaignCreate, CampaignResponse, CampaignUpdate
 from app.services.security import get_auth_tenant
 
 router = APIRouter()
