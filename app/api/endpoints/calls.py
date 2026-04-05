@@ -18,7 +18,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-HERMES_WAIT_TIMEOUT = 10  # seconds to wait for Hermes enrichment before dialing
+HERMES_WAIT_TIMEOUT = 1  # Instant dial for test calls/gate
 
 def classify_interest(transcript: str) -> str:
     """Simple heuristic to figure out lead interest based on full transcript."""
