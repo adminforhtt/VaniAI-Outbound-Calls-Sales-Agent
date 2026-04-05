@@ -34,6 +34,6 @@ def launch_campaign(campaign_id: int, db: Session = Depends(get_db), tenant_id: 
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     
-    from app.workers.celery_app import run_campaign_task
+    from app.worker.tasks import run_campaign_task
     task = run_campaign_task.delay(campaign_id)
     return {"status": "success", "task_id": task.id, "message": "Campaign launch initiated."}

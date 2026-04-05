@@ -35,6 +35,7 @@ app.include_router(hermes.router, prefix="/api/hermes", tags=["Hermes"])
 @app.on_event("startup")
 async def startup_event():
     logger.info(f"Starting up Vani AI for Production (Env: {settings.ENVIRONMENT})")
+    logger.info(f"BASE_URL: {settings.BASE_URL} (Important for Twilio webhooks)")
 
 @app.on_event("startup")
 async def run_db_migrations():

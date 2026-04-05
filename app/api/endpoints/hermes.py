@@ -53,7 +53,7 @@ def trigger_lead_research(
     lead.metadata_json = meta
     db.commit()
 
-    from app.workers.celery_app import enrich_lead_task
+    from app.worker.tasks import enrich_lead_task
     enrich_lead_task.delay(lead_id)
 
     return {"status": "success", "message": f"Research triggered for lead {lead_id}"}
@@ -169,7 +169,7 @@ def evolve_campaign_script(
     if not camp:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    from app.workers.celery_app import evolve_scripts_task
+    from app.worker.tasks import evolve_scripts_task
     task = evolve_scripts_task.delay(campaign_id)
 
     return {

@@ -40,27 +40,20 @@ class BaseVaniTask(Task):
 @celery_app.task(
     base=BaseVaniTask,
     bind=True,
-    name="vani_ai.enrich_lead",
+    name="enrich_lead_task",  # Standard name used by API
     queue="enrichment",
-    # Auto-retry these specific exception types immediately
     autoretry_for=(OperationalError, ConnectionError, TimeoutError),
     retry_kwargs={"max_retries": 5, "countdown": 5},
-    # Task-level timeout — kill task if it runs > 5 minutes
     time_limit=300,
-    soft_time_limit=240,  # sends SIGTERM at 4min, SIGKILL at 5min
+    soft_time_limit=240,
 )
-def enrich_lead_task(self, lead_id: str, campaign_id: str) -> dict:
+def enrich_lead_task(self, lead_id: int) -> str:
     """
     Enrich a lead via Hermes agent.
-    Retries up to 5 times on connection/timeout errors.
-    Updates lead record in DB on success.
     """
-    logger.info(f"[enrich_lead] Starting enrichment. lead_id={lead_id}, campaign_id={campaign_id}")
-
+    logger.info(f"[enrich_lead] Starting enrichment. lead_id={lead_id}")
     try:
         from app.models.core import Lead
-        
-        # Build session
         try:
             from app.db.session import get_db
             session = next(get_db())
@@ -70,98 +63,106 @@ def enrich_lead_task(self, lead_id: str, campaign_id: str) -> dict:
             
         lead = session.query(Lead).filter(Lead.id == lead_id).first()
         if not lead:
-            raise ValueError(f"Lead {lead_id} not found in DB")
+            return "Lead not found"
             
         tenant_id = getattr(lead, "tenant_id", 1)
         name = lead.name or "Unknown"
-        meta = lead.metadata_json or {}
-        company = meta.get("company", "Unknown Company")
-        
+        company = lead.company or name
         session.close()
 
-        # Instantiate LeadEnrichmentService
         service = LeadEnrichmentService(tenant_id=tenant_id)
-        
-        # Run enrichment (this writes to DB implicitly via save_lead_research)
         success = service.research_lead(lead_id=lead_id, lead_name=name, company=company)
+        return "Success" if success else "Failed"
 
-        if not success:
-            raise ValueError(f"Hermes failed to generate research for lead {lead_id}")
-
-        logger.info(f"[enrich_lead] ✅ Completed for lead_id={lead_id}")
-        return {"status": "success", "lead_id": lead_id}
-
-    except (OperationalError, ConnectionError, TimeoutError) as e:
-        # These are retriable — Celery autoretry handles them
+    except (OperationalError, ConnectionError, TimeoutError):
         raise
-
     except Exception as e:
-        logger.exception(f"[enrich_lead] Non-retriable error for lead {lead_id}: {e}")
-        # Mark as failed in DB
-        try:
-            from app.models.core import Lead
-            try:
-                from app.db.session import get_db
-                session = next(get_db())
-            except ImportError:
-                from app.models.core import SessionLocal
-                session = SessionLocal()
-                
-            lead = session.query(Lead).filter(Lead.id == lead_id).first()
-            if lead:
-                lead.enrichment_status = "failed"
-                lead.enrichment_error = str(e)
-                session.commit()
-            session.close()
-        except Exception as db_e:
-            logger.error(f"[enrich_lead] Also failed to update DB: {db_e}")
-        raise
+        logger.exception(f"[enrich_lead] Error for lead {lead_id}: {e}")
+        return "Failed"
 
 
-@celery_app.task(
-    base=BaseVaniTask,
-    bind=True,
-    name="vani_ai.health_check",
-    queue="default",
-)
-def celery_health_check(self) -> dict:
-    return {"status": "alive", "worker_id": self.request.hostname}
+@celery_app.task(name="score_lead_task")
+def score_lead_task(call_sid: str, transcript: str):
+    from app.agents.qualification import QualificationAgent
+    from app.config.database import SessionLocal
+    from app.models.core import CallLog
+    import asyncio
 
-@celery_app.task(
-    base=BaseVaniTask,
-    bind=True,
-    name="vani_ai.run_campaign_task",
-    queue="default"
-)
-def run_campaign_task(self, campaign_id: int):
-    logger.info(f"Starting bulk dial for campaign {campaign_id}")
+    agent = QualificationAgent()
     try:
-        from app.db.session import get_db
-        session = next(get_db())
-    except ImportError:
-        from app.models.core import SessionLocal
-        session = SessionLocal()
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
+    score_data = loop.run_until_complete(agent.score_lead(transcript))
+    db = SessionLocal()
+    try:
+        call_log = db.query(CallLog).filter(CallLog.call_sid == call_sid).first()
+        if call_log:
+            call_log.outcome = score_data.get("interest_level")
+            call_log.score = score_data
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error saving score for {call_sid}: {e}")
+        db.rollback()
+    finally:
+        db.close()
+    return score_data
+
+
+@celery_app.task(name="evolve_scripts_task")
+def evolve_scripts_task(campaign_id: int):
+    from app.config.database import SessionLocal
+    from app.models.core import Campaign, CallLog, Lead
+    db = SessionLocal()
+    try:
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign: return "Campaign not found"
+        logs = db.query(CallLog).filter(
+            CallLog.lead_id.in_(db.query(Lead.id).filter(Lead.campaign_id == campaign_id)),
+            CallLog.status == "completed",
+            CallLog.transcript != None
+        ).order_by(CallLog.created_at.desc()).limit(10).all()
+        transcripts = [log.transcript for log in logs if log.transcript]
+        if not transcripts: return "No transcripts available"
+        ts_summary = "\n---\n".join(transcripts)
+    finally:
+        db.close()
+    try:
+        from app.services.hermes_service import LeadEnrichmentService
+        service = LeadEnrichmentService(tenant_id=campaign.tenant_id if hasattr(campaign, "tenant_id") else 1)
+        success = service.evolve_campaign(campaign_id=campaign_id, transcripts_summary=ts_summary)
+        return "Success" if success else "Failed"
+    except Exception as e:
+        logger.error(f"evolve_scripts_task: {e}")
+        return "Failed"
+
+
+@celery_app.task(name="run_campaign_task")
+def run_campaign_task(campaign_id: int):
+    logger.info(f"Starting bulk dial for campaign {campaign_id}")
+    from app.config.database import SessionLocal
     from app.models.core import Lead, CallLog
     from app.services.twilio_client import TwilioService
     from app.config.settings import settings
     import time
     
-    leads = session.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == 'pending').all()
-    base_url = settings.BASE_URL.rstrip('/')
-    url = f"{base_url}/api/calls/voice"
-
-    for lead in leads:
-        try:
-            call_sid = TwilioService.initiate_call(to_number=lead.phone, url=url)
-            lead.status = "initiated"
-            call_log = CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=lead.tenant_id, status="initiated")
-            session.add(call_log)
-        except Exception as e:
-            logger.error(f"Failed to dial {lead.phone}: {e}")
-            lead.status = "failed"
-        session.commit()
-        time.sleep(1) # pacing
-        
-    session.close()
-    return {"status": "success", "campaign": campaign_id, "leads_dialed": len(leads)}
+    db = SessionLocal()
+    try:
+        leads = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == 'pending').all()
+        base_url = settings.BASE_URL.rstrip('/')
+        for lead in leads:
+            try:
+                call_sid = TwilioService.initiate_call(to_number=lead.phone, url=f"{base_url}/api/calls/voice")
+                lead.status = "initiated"
+                db.add(CallLog(call_sid=call_sid, lead_id=lead.id, tenant_id=lead.tenant_id, status="initiated"))
+                db.commit()
+            except Exception as e:
+                logger.error(f"Failed to dial {lead.phone}: {e}")
+                lead.status = "failed"
+                db.commit()
+            time.sleep(1) # pacing
+        return f"Dialed {len(leads)} leads"
+    finally:
+        db.close()
