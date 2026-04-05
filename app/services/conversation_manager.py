@@ -601,39 +601,39 @@ class ConversationManager:
         logger.info(f"Stream started: {self.stream_sid}")
         if not self.has_greeted:
             logger.info(f"FIRST_EVENT: Handling 'start' for {self.call_sid}")
+            self.has_greeted = True # Mark first so we don't repeat
+            
+            # 1. IMMEDIATE AUDIO PING (Prevent Twilio Timeout)
+            # This is 400ms of soft comfort noise / silence in mu-law
+            SAFETY_PING = b'\xff' * 3200 
+            await self._stream_audio_to_twilio(SAFETY_PING)
+            
+            # 2. Async Context Loading
             await self._initialize_campaign_context()
             self.stt.language = self.language
             
-            # Hardcoded safety greeting (English: "Hello, I am Vani.")
-            # This ensures at least SOME audio plays even if TTS fails instantly
-            SAFETY_HELLO_MULAW = "fHh8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8" # placeholder
-            
-            # Real dynamic greeting
-            greeting_text = f"नमस्कार! मैं {self.campaign_name} से बात कर रही हूँ। आप कैसे हैं?" # fallback
+            # 3. Dynamic Greeting
+            greeting_text = f"नमस्कार! मैं {self.campaign_name} से बात कर रही हूँ।" 
             if self.language.startswith("en"):
-                greeting_text = f"Hello! I am calling from {self.company_name} regarding {self.campaign_name}. How are you?"
-            elif self.language.startswith("hi"):
-                greeting_text = f"नमस्कार! मैं {self.company_name} से {self.campaign_name} के बारे में बात कर रही हूँ।"
-
+                greeting_text = f"Hello! I am calling from {self.company_name} regarding {self.campaign_name}."
+                
             logger.info(f"GREETING_PLAN: Generating TTS for: {greeting_text}")
             try:
-                # Try real TTS but with a TIGHT timeout so we don't stall the stream
+                # Try real TTS but with a TIGHT timeout
                 greeting_audio = await asyncio.wait_for(
                     TTSService.generate_speech(greeting_text, language=self.language, speaker=self.voice),
-                    timeout=5.0
+                    timeout=4.0
                 )
             except Exception as e:
-                logger.error(f"GREETING_TTS_FAILED: {e} - using cached fallback")
+                logger.error(f"GREETING_TTS_FAILED: {e}")
                 greeting_audio = b""
 
             if not greeting_audio:
                 greeting_audio = self._get_fallback_audio()
-                logger.warning("GREETING_FALLBACK_TRIGGERED: Sent silence or fallback file.")
 
             await self.send_audio_safe(greeting_audio)
             self.last_agent_speech_time = time.time()
             self._session_cache["history"].append({"role": "assistant", "content": greeting_text})
-            self.has_greeted = True
             logger.info("GREETING_SENT: Call is now interactive.")
 
     async def _handle_media_chunk(self, data):
