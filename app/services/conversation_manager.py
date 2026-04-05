@@ -528,18 +528,39 @@ class ConversationManager:
         # Context is definitively loaded later when Twilio sends "start" event.
         logger.info(f"Session started, awaiting Twilio socket events to hook language.")
 
-
         try:
             twilio_task = asyncio.create_task(self.receive_from_twilio())
             stt_task = asyncio.create_task(self.process_stt_stream_loop())
-            await asyncio.gather(twilio_task, stt_task)
-        except asyncio.CancelledError:
-            pass
+            keep_alive_task = asyncio.create_task(self._keep_alive_loop())
+            
+            # Wait for any of them to fail or finish
+            done, pending = await asyncio.wait(
+                [twilio_task, stt_task, keep_alive_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in done:
+                try:
+                    task.result()
+                except Exception as e:
+                    logger.error(f"Task failed in conversation manager: {e}")
+            
+            for task in pending:
+                task.cancel()
         except Exception as e:
             logger.error(f"Error in conversation manager: {e}")
         finally:
             self.cancel_ongoing_tts()
             await self.stt.stop()
+
+    async def _keep_alive_loop(self):
+        """Sends a tiny silence chunk every 3 seconds to keep the proxy connection alive."""
+        while True:
+            await asyncio.sleep(3.0)
+            if self.stream_sid:
+                # 20ms of silence
+                await self._stream_audio_to_twilio(b'\xff' * 160)
+                logger.debug("KEEP_ALIVE_SENT")
 
     async def receive_from_twilio(self):
         logger.info(f"[receive_from_twilio] Stream loop started. Call SID: {self.call_sid}")
