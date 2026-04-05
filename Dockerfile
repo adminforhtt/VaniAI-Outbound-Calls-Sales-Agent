@@ -15,6 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN chown -R celeryuser:celery /app
 
 # Install Hermes internal dependencies to satisfy run_agent.py
 RUN pip install --no-cache-dir -r libs/hermes/requirements.txt

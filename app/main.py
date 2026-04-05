@@ -49,7 +49,9 @@ async def run_db_migrations():
         alembic_command.upgrade(alembic_cfg, "head")
         logger.info("✅ DB migrations complete — at head.")
     except Exception as e:
-        logger.critical(f"❌ DB migration failed on startup: {e}")
+        import traceback
+        logger.critical(f"❌ DB migration failed on startup: {str(e)}")
+        logger.critical(traceback.format_exc())
         raise  # crash startup if migrations fail — better than silent data corruption
 
 from app.api.endpoints.health import router as health_router
