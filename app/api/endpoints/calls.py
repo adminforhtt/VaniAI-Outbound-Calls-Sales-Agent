@@ -200,7 +200,9 @@ async def voice_webhook(request: Request):
         base_url = settings.BASE_URL.rstrip('/')
         ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://") + f"/api/calls/stream/{call_sid}"
         
-        logger.info(f"VOICE_WEBHOOK: Connection from {call_sid}. Streaming to {ws_url}")
+        logger.info(f"VOICE_WEBHOOK: Connection from {call_sid}")
+        logger.info(f"VOICE_WEBHOOK: BASE_URL set to: {settings.BASE_URL}")
+        logger.info(f"VOICE_WEBHOOK: TARGET_WS_URL: {ws_url}")
 
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
         <Response>
