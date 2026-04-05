@@ -1,130 +1,143 @@
+"""
+Hermes Tools — database save helpers for lead enrichment and campaign script evolution.
+
+These are standalone functions (no external agent framework dependency).
+They are called directly by LeadEnrichmentService.
+"""
+
 import json
 import logging
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
+from typing import Dict, Any
+from sqlalchemy.sql import func
 from app.config.database import SessionLocal
 from app.models.core import Lead, Campaign, ScriptVersion
-from libs.hermes.tools.registry import registry
 
 logger = logging.getLogger(__name__)
 
-def update_lead_research_handler(args: Dict[str, Any], **kwargs) -> str:
+
+def save_lead_research(lead_id: int, data: Dict[str, Any]) -> bool:
     """
-    Update a lead with structured enrichment data found by the Hermes agent.
-    Saves a rich JSON object into lead.metadata_json and flips enrichment_status.
-    """
-    lead_id = args.get("lead_id")
+    Saves structured enrichment data to a Lead record.
     
+    Args:
+        lead_id: The Lead.id to update
+        data: Dict with keys: company_name, summary, recent_activity, pain_points, icebreaker, pitch_angle
+    
+    Returns:
+        True on success, False on failure
+    """
     db = SessionLocal()
     try:
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if not lead:
-            return json.dumps({"error": f"Lead {lead_id} not found"})
-        
+            logger.error(f"save_lead_research: Lead {lead_id} not found")
+            return False
+
         meta = lead.metadata_json or {}
-        
-        # Store structured intelligence fields
-        meta["company_name"] = args.get("company_name", "")
-        meta["summary"] = args.get("summary") or args.get("research_summary", "")
-        meta["recent_activity"] = args.get("recent_activity", "")
-        meta["pain_points"] = args.get("pain_points", [])
-        meta["icebreaker"] = args.get("icebreaker", "")
-        meta["pitch_angle"] = args.get("pitch_angle", "")
-        
-        # Legacy compat: keep description for dashboard views
+
+        meta["company_name"] = data.get("company_name", "")
+        meta["summary"] = data.get("summary", "")
+        # Legacy compat
         meta["description"] = meta["summary"]
+        meta["recent_activity"] = data.get("recent_activity", "")
+        meta["recent_news"] = meta["recent_activity"]  # for HermesConsole display
+        meta["pain_points"] = data.get("pain_points", [])
+        meta["icebreaker"] = data.get("icebreaker", "")
+        meta["pitch_angle"] = data.get("pitch_angle", "")
         meta["enrichment_status"] = "enriched"
-        
+
         lead.metadata_json = meta
         lead.enrichment_status = "enriched"
-        
-        from sqlalchemy.sql import func
         lead.enriched_at = func.now()
-        
+
         db.commit()
-        logger.info(f"HERMES_SAVE: Lead {lead_id} enriched with structured data ({len(json.dumps(meta))} bytes)")
-        return json.dumps({"status": "success", "message": f"Lead {lead_id} updated with structured research."})
+        logger.info(f"save_lead_research: Lead {lead_id} enriched successfully ({len(json.dumps(meta))} bytes)")
+        return True
+
     except Exception as e:
         db.rollback()
-        logger.error(f"HERMES_SAVE_FAILED: Lead {lead_id}: {e}")
-        return json.dumps({"error": str(e)})
+        logger.error(f"save_lead_research: Failed for lead {lead_id}: {e}")
+        return False
     finally:
         db.close()
 
-def update_campaign_script_handler(args: Dict[str, Any], **kwargs) -> str:
+
+def save_campaign_script(campaign_id: int, new_script: str, reasoning: str) -> bool:
     """
-    Updates the campaign script with a new version based on agent's analysis.
-    """
-    campaign_id = args.get("campaign_id")
-    new_script = args.get("new_script")
-    reasoning = args.get("reasoning")
+    Updates a campaign's script template and adds a version history entry.
     
+    Args:
+        campaign_id: The Campaign.id to update
+        new_script: The new script content
+        reasoning: Why the script was changed
+    
+    Returns:
+        True on success, False on failure
+    """
     db = SessionLocal()
     try:
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
         if not campaign:
-            return json.dumps({"error": f"Campaign {campaign_id} not found"})
-        
-        # 1. Update Campaign script
+            logger.error(f"save_campaign_script: Campaign {campaign_id} not found")
+            return False
+
+        # Update the campaign's main script
         campaign.script_template = new_script
-        
-        # 2. Add to ScriptVersion history
-        new_version = db.query(ScriptVersion).filter(ScriptVersion.campaign_id == campaign_id).count() + 1
-        history = ScriptVersion(
+
+        # Record version history
+        new_version_num = db.query(ScriptVersion).filter(
+            ScriptVersion.campaign_id == campaign_id
+        ).count() + 1
+
+        version_entry = ScriptVersion(
             campaign_id=campaign_id,
-            version=new_version,
+            version=new_version_num,
             script_content=new_script,
             reasoning=reasoning,
-            performance_score=0.0 # Default
+            performance_score=0.0,
         )
-        db.add(history)
+        db.add(version_entry)
         db.commit()
-        return json.dumps({"status": "success", "version": new_version})
+
+        logger.info(f"save_campaign_script: Campaign {campaign_id} updated to version {new_version_num}")
+        return True
+
     except Exception as e:
         db.rollback()
-        return json.dumps({"error": str(e)})
+        logger.error(f"save_campaign_script: Failed for campaign {campaign_id}: {e}")
+        return False
     finally:
         db.close()
 
-# Register the tools with Hermes Registry
-registry.register(
-    name="update_lead_research",
-    toolset="vania_tools",
-    schema={
-        "name": "update_lead_research",
-        "description": "Save structured research results for a specific lead into the database. You MUST provide all fields.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "lead_id": {"type": "integer", "description": "The internal ID of the lead to update."},
-                "company_name": {"type": "string", "description": "The official company or business name."},
-                "summary": {"type": "string", "description": "2-3 sentence summary of what the company does."},
-                "recent_activity": {"type": "string", "description": "Any recent news, product launches, or events."},
-                "pain_points": {"type": "array", "items": {"type": "string"}, "description": "List of 2-3 business challenges or needs the company might have."},
-                "icebreaker": {"type": "string", "description": "A short, 1-sentence personalized opening line referencing something specific about them."},
-                "pitch_angle": {"type": "string", "description": "The best angle to pitch our product/service based on their situation."}
-            },
-            "required": ["lead_id", "company_name", "summary", "icebreaker"]
-        }
-    },
-    handler=update_lead_research_handler
-)
 
-registry.register(
-    name="update_campaign_script",
-    toolset="vania_tools",
-    schema={
-        "name": "update_campaign_script",
-        "description": "Updates a campaign's main script template and records a version history with reasoning.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "campaign_id": {"type": "integer", "description": "The ID of the campaign to optimize."},
-                "new_script": {"type": "string", "description": "The full body of the new optimized script template."},
-                "reasoning": {"type": "string", "description": "Explanation of why the script was modified."}
-            },
-            "required": ["campaign_id", "new_script", "reasoning"]
-        }
-    },
-    handler=update_campaign_script_handler
-)
+# ─── Legacy handler aliases (kept for API compatibility) ──────────────────────
+
+def update_lead_research_handler(args: Dict[str, Any], **kwargs) -> str:
+    """Legacy wrapper kept for API compatibility."""
+    lead_id = args.get("lead_id")
+    if not lead_id:
+        return json.dumps({"error": "lead_id is required"})
+    
+    success = save_lead_research(lead_id=lead_id, data=args)
+    if success:
+        return json.dumps({"status": "success", "message": f"Lead {lead_id} updated."})
+    return json.dumps({"error": f"Failed to update lead {lead_id}"})
+
+
+def update_campaign_script_handler(args: Dict[str, Any], **kwargs) -> str:
+    """Legacy wrapper kept for API compatibility."""
+    campaign_id = args.get("campaign_id")
+    new_script = args.get("new_script", "")
+    reasoning = args.get("reasoning", "Evolved by agent.")
+    
+    if not campaign_id or not new_script:
+        return json.dumps({"error": "campaign_id and new_script are required"})
+    
+    success = save_campaign_script(
+        campaign_id=campaign_id,
+        new_script=new_script,
+        reasoning=reasoning,
+    )
+    if success:
+        return json.dumps({"status": "success"})
+    return json.dumps({"error": f"Failed to update campaign {campaign_id}"})

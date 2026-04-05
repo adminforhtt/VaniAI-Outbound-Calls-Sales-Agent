@@ -1,97 +1,173 @@
-import os
-import sys
+"""
+Lead Enrichment Service (replaces the broken Hermes Agent dependency).
+
+Uses the existing Groq/OpenRouter LLM to research a lead and generate:
+  - Company summary
+  - Personalized icebreaker
+  - Pitch angle
+  - Pain points
+
+No external CLI agent required — just a structured LLM prompt.
+"""
+
+import asyncio
+import json
 import logging
-from typing import Dict, Any, Optional
-
-# Add the libs/hermes directory to the Python path for imports to work
-HERMES_PATH = os.path.join(os.getcwd(), "libs", "hermes")
-if HERMES_PATH not in sys.path:
-    sys.path.append(HERMES_PATH)
-
-# Import the AIAgent and tools registry from the Nous Research framework
-from run_agent import AIAgent
-from model_tools import registry
+from typing import Dict, Any
 from app.config.settings import settings
-
-# Import our custom tools to ensure they are registered
-import app.agents.hermes_tools
 
 logger = logging.getLogger(__name__)
 
-class HermesOrchestrator:
+# A sync-safe HTTP client for Celery tasks (not async context)
+import httpx
+
+def _call_llm_sync(prompt: str, provider: str = None) -> str:
+    """Synchronous LLM call for use inside Celery workers."""
+    # Prefer Groq; fall back to OpenRouter
+    use_provider = provider or ("groq" if settings.GROQ_API_KEY else "openrouter")
+
+    if use_provider == "groq" and settings.GROQ_API_KEY:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        model = "llama-3.3-70b-versatile"
+    else:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        model = "meta-llama/llama-3.3-70b-instruct"
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.5,
+        "max_tokens": 600,
+    }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"LLM call failed: {e}")
+        return ""
+
+
+class LeadEnrichmentService:
     """
-    Orchestrates the Nous Research Hermes Agent to perform Vani AI tasks.
-    It uses Browserbase + OpenRouter (Free Qwen) to fulfill requests.
-    """
+    Lightweight lead intelligence engine powered by your existing LLM.
     
+    Replaces the heavy NousResearch Hermes CLI agent that was cloned into
+    libs/hermes/ — which was never designed to be embedded in a web app.
+    """
+
     def __init__(self, tenant_id: int):
         self.tenant_id = tenant_id
-        self.model = settings.HERMES_MODEL or "qwen/qwen-2.5-72b-instruct:free"
-        
-        # Inject Browserbase and OpenRouter credentials into environment for Hermes
-        os.environ["BROWSERBASE_API_KEY"] = settings.BROWSERBASE_API_KEY or ""
-        os.environ["BROWSERBASE_PROJECT_ID"] = settings.BROWSERBASE_PROJECT_ID or ""
-        os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY or ""
-        
-        # Initialize the AIAgent with native Nous Research configuration
-        self.agent = AIAgent(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.OPENROUTER_API_KEY,
-            model=self.model,
-            max_iterations=10, # Keep it tight for performance
-            enabled_toolsets=["vania_tools", "browser_tools", "web_tools"], # Use our tools plus built-in browsing
-            quiet_mode=True
-        )
 
     def research_lead(self, lead_id: int, lead_name: str, company: str) -> bool:
         """
-        Uses Hermes to research a company and update lead metadata with structured intelligence.
+        Uses Groq/OpenRouter to research a company, then saves the result
+        directly into the Lead record via update_lead_research_handler.
         """
-        prompt = f"""
-        Task: Research the company "{company}" for lead "{lead_name}" (ID: {lead_id}).
+        prompt = f"""You are a B2B sales intelligence assistant. Research the company "{company}" 
+and generate a structured JSON object to help a sales agent personalize their pitch.
+
+Return ONLY a valid JSON object with these fields (no explanation, no markdown, just JSON):
+{{
+  "company_name": "Official company name",
+  "summary": "2-3 sentence summary of what they do",
+  "recent_activity": "Any recent news, product launches, or funding (or 'No specific news found')",
+  "pain_points": ["pain point 1", "pain point 2", "pain point 3"],
+  "icebreaker": "A natural 1-sentence personalized opening line referencing something specific about them",
+  "pitch_angle": "The best angle to pitch our product/service based on their situation"
+}}"""
+
+        logger.info(f"LeadEnrichmentService: Researching lead {lead_id} ({company})...")
         
-        Steps:
-        1. Use the browser to find their website and recent news.
-        2. Identify what they do, any recent launches or initiatives.
-        3. Identify 2-3 potential pain points or business challenges they might have.
-        4. Create a short personalized icebreaker referencing something specific about them.
-        5. Suggest the best pitch angle for our product based on their situation.
-        
-        IMPORTANT: Use the 'update_lead_research' tool to save the results with ALL these fields:
-        - company_name: The official company name
-        - summary: 2-3 sentence summary of what they do
-        - recent_activity: Any recent news, product launches, or events
-        - pain_points: List of 2-3 business challenges they might face
-        - icebreaker: A personalized 1-sentence opening line
-        - pitch_angle: The best angle to pitch our service
-        """
         try:
-            logger.info(f"Hermes starting structured research for lead {lead_id} ({company})...")
-            self.agent.run_conversation(prompt)
+            raw = _call_llm_sync(prompt)
+            if not raw:
+                logger.warning(f"Empty LLM response for lead {lead_id}")
+                return False
+
+            # Extract JSON from the response (handle any markdown wrapping)
+            import re
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not json_match:
+                logger.error(f"No JSON found in LLM response for lead {lead_id}: {raw[:200]}")
+                return False
+
+            data = json.loads(json_match.group())
+
+            # Save to database via the existing handler
+            from app.agents.hermes_tools import save_lead_research
+            save_lead_research(lead_id=lead_id, data=data)
+
+            logger.info(f"LeadEnrichmentService: Lead {lead_id} enriched successfully")
             return True
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON for lead {lead_id}: {e}")
+            return False
         except Exception as e:
-            logger.error(f"Hermes research failed: {e}")
+            logger.error(f"Enrichment failed for lead {lead_id}: {e}")
             return False
 
     def evolve_campaign(self, campaign_id: int, transcripts_summary: str) -> bool:
         """
-        Uses Hermes to analyze transcripts and optimize the script.
+        Analyzes recent call transcripts and rewrites the campaign script
+        to address common objections and improve conversion.
         """
-        prompt = f"""
-        Campaign ID: {campaign_id}
-        User Hang-up Reasons / Feedback Summary:
-        {transcripts_summary}
+        prompt = f"""You are a sales script optimization expert. Analyze the following call transcripts 
+and rewrite the campaign script to improve conversions.
+
+Call Transcripts Summary:
+{transcripts_summary[:3000]}
+
+Return ONLY a valid JSON object (no markdown, no explanation):
+{{
+  "new_script": "The full rewritten campaign script template",
+  "reasoning": "Brief explanation of what was changed and why"
+}}"""
+
+        logger.info(f"LeadEnrichmentService: Evolving campaign {campaign_id}...")
         
-        Task:
-        1. Analyze why users are hanging up.
-        2. Rewrite the campaign script to address these objections (e.g. move price later, highlight benefits sooner).
-        3. Use the 'update_campaign_script' tool to deploy version version.
-        4. Be concise and professional in reasoning.
-        """
         try:
-            logger.info(f"Hermes starting script evolution for Campaign {campaign_id}...")
-            self.agent.run_conversation(prompt)
+            raw = _call_llm_sync(prompt)
+            if not raw:
+                return False
+
+            import re
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not json_match:
+                logger.error(f"No JSON found in evolution response: {raw[:200]}")
+                return False
+
+            data = json.loads(json_match.group())
+            new_script = data.get("new_script", "")
+            reasoning = data.get("reasoning", "Evolved based on transcript analysis.")
+
+            if not new_script:
+                return False
+
+            from app.agents.hermes_tools import save_campaign_script
+            save_campaign_script(campaign_id=campaign_id, new_script=new_script, reasoning=reasoning)
+            
+            logger.info(f"LeadEnrichmentService: Campaign {campaign_id} script evolved")
             return True
-        except Exception as e:
-            logger.error(f"Hermes evolution failed: {e}")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse evolution JSON: {e}")
             return False
+        except Exception as e:
+            logger.error(f"Script evolution failed: {e}")
+            return False
+
+
+# Backwards-compatible alias so existing code using HermesOrchestrator still works
+HermesOrchestrator = LeadEnrichmentService

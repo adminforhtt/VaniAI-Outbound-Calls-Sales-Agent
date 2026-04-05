@@ -27,6 +27,12 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   // Upload state
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvCustomScript, setCsvCustomScript] = useState('');
+  const [csvCustomName, setCsvCustomName] = useState('');
+  const [csvCustomLanguage, setCsvCustomLanguage] = useState('hi-IN');
+  const [csvCustomVoice, setCsvCustomVoice] = useState('priya');
+  const [csvCustomLlm, setCsvCustomLlm] = useState('groq');
+  const [csvMode, setCsvMode] = useState<'existing' | 'custom'>('existing');
 
   // Quick test
   const [testPhone, setTestPhone] = useState('');
@@ -132,20 +138,46 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   };
 
   const handleCsvUpload = async () => {
-    if (!csvFile || !selectedCampaignId) return;
+    if (!csvFile) return;
+    if (csvMode === 'existing' && !selectedCampaignId) {
+      alert('Please select a campaign or switch to "Custom Description" mode.');
+      return;
+    }
+    if (csvMode === 'custom' && !csvCustomScript.trim()) {
+      alert('Please enter a custom agent description.');
+      return;
+    }
     setLoading(true);
     const formData = new FormData();
     formData.append('file', csvFile);
+    if (csvMode === 'custom') {
+      if (csvCustomScript) formData.append('custom_script', csvCustomScript);
+      if (csvCustomName) formData.append('custom_name', csvCustomName);
+      formData.append('custom_language', csvCustomLanguage);
+      formData.append('custom_voice', csvCustomVoice);
+      formData.append('custom_llm_provider', csvCustomLlm);
+    }
+    const url = csvMode === 'existing'
+      ? `${API}/leads/upload?campaign_id=${selectedCampaignId}`
+      : `${API}/leads/upload`;
     try {
-      const res = await fetch(`${API}/leads/upload?campaign_id=${selectedCampaignId}`, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       if (res.ok) {
-        alert('Leads uploaded successfully!');
+        const data = await res.json();
+        alert(`${data.message}${data.campaign_id ? `\nCreated/assigned to Campaign #${data.campaign_id}` : ''}`);
         setCsvFile(null);
+        setCsvCustomScript('');
+        setCsvCustomName('');
         fetchLeads();
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 3000);
+      } else {
+        const err = await res.json();
+        alert(`Upload failed: ${err.detail || 'Unknown error'}`);
       }
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -391,44 +423,142 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               <span className="dot" style={{ backgroundColor: 'var(--accent-purple)' }}></span>
               Bulk Lead Import (.CSV)
             </div>
-            <p className="section-sub">Assign a contact list to a specific sales strategy.</p>
-            <div className="config-row">
-               <div>
-                  <label className="form-label">Target Strategy</label>
-                  <select 
-                    className="config-select" 
-                    value={selectedCampaignId} 
+            <p className="section-sub">Upload a contact list and assign a custom agent description for this batch.</p>
+
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: 'var(--space-md)' }}>
+              <button
+                id="csv-mode-existing"
+                onClick={() => setCsvMode('existing')}
+                style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '12px',
+                  background: csvMode === 'existing' ? 'var(--accent-purple)' : '#F3F4F6',
+                  color: csvMode === 'existing' ? 'white' : '#4B5563' }}
+              >Use Existing Campaign</button>
+              <button
+                id="csv-mode-custom"
+                onClick={() => setCsvMode('custom')}
+                style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '12px',
+                  background: csvMode === 'custom' ? 'var(--accent-purple)' : '#F3F4F6',
+                  color: csvMode === 'custom' ? 'white' : '#4B5563' }}
+              >Custom Description</button>
+            </div>
+
+            {csvMode === 'existing' ? (
+              <div className="config-row">
+                <div>
+                  <label className="form-label">Target Campaign</label>
+                  <select
+                    id="csv-campaign-select"
+                    className="config-select"
+                    value={selectedCampaignId}
                     onChange={(e) => setSelectedCampaignId(e.target.value)}
                   >
-                    <option value="">Select a strategy...</option>
+                    <option value="">Select a campaign...</option>
                     {campaigns.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
-               </div>
-               <div>
-                  <label className="form-label">Leads File</label>
-                  <input 
-                    type="file" 
-                    accept=".csv" 
+                </div>
+                <div>
+                  <label className="form-label">Leads File (.csv)</label>
+                  <input
+                    id="csv-file-input"
+                    type="file"
+                    accept=".csv"
                     onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
                     style={{ fontSize: 'var(--font-size-xs)' }}
                   />
-               </div>
-            </div>
-            <button 
-              className="btn-deploy" 
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="config-row" style={{ marginBottom: 'var(--space-md)' }}>
+                  <div>
+                    <label className="form-label">Campaign Name (optional)</label>
+                    <input
+                      id="csv-custom-name"
+                      className="form-input"
+                      value={csvCustomName}
+                      onChange={(e) => setCsvCustomName(e.target.value)}
+                      placeholder="e.g. Loan Outreach May 2026"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Leads File (.csv)</label>
+                    <input
+                      id="csv-file-input-custom"
+                      type="file"
+                      accept=".csv"
+                      onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                      style={{ fontSize: 'var(--font-size-xs)' }}
+                    />
+                  </div>
+                </div>
+                <div className="config-row" style={{ marginBottom: 'var(--space-md)' }}>
+                  <div>
+                    <label className="form-label">Brain (LLM)</label>
+                    <select id="csv-llm" className="config-select" value={csvCustomLlm} onChange={(e) => setCsvCustomLlm(e.target.value)}>
+                      <option value="groq">Groq — Ultra Fast</option>
+                      <option value="openrouter">OpenRouter</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Voice Profile</label>
+                    <select id="csv-voice" className="config-select" value={csvCustomVoice} onChange={(e) => setCsvCustomVoice(e.target.value)}>
+                      <optgroup label="Female">
+                        <option value="priya">Priya (Female)</option>
+                        <option value="anushka">Anushka (Female)</option>
+                        <option value="neha">Neha (Female)</option>
+                      </optgroup>
+                      <optgroup label="Male">
+                        <option value="anand">Anand (Male)</option>
+                        <option value="rahul">Rahul (Male)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Language</label>
+                    <select id="csv-language" className="config-select" value={csvCustomLanguage} onChange={(e) => setCsvCustomLanguage(e.target.value)}>
+                      <option value="hi-IN">Hindi</option>
+                      <option value="en-IN">English</option>
+                      <option value="mr-IN">Marathi</option>
+                      <option value="bn-IN">Bengali</option>
+                      <option value="ta-IN">Tamil</option>
+                      <option value="te-IN">Telugu</option>
+                      <option value="gu-IN">Gujarati</option>
+                      <option value="kn-IN">Kannada</option>
+                      <option value="ml-IN">Malayalam</option>
+                      <option value="pa-IN">Punjabi</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="form-label">Custom Agent Description *</label>
+                <textarea
+                  id="csv-custom-script"
+                  className="config-textarea"
+                  value={csvCustomScript}
+                  onChange={(e) => setCsvCustomScript(e.target.value)}
+                  placeholder="Describe what the agent should do on this call. E.g. You are calling to offer a home loan at 8.5% interest. Ask if the customer owns property and if they need funds for renovation or purchase..."
+                  required
+                />
+              </div>
+            )}
+
+            <button
+              id="csv-upload-btn"
+              className="btn-deploy"
               style={{ background: 'var(--accent-purple)', marginTop: 'var(--space-md)' }}
               onClick={handleCsvUpload}
-              disabled={loading || !csvFile || !selectedCampaignId}
+              disabled={loading || !csvFile || (csvMode === 'existing' && !selectedCampaignId) || (csvMode === 'custom' && !csvCustomScript.trim())}
             >
-              Upload & Process Leads
+              {loading ? 'Uploading...' : 'Upload & Process Leads'}
             </button>
-            
-            {/* Launch Campaign Button */}
-            {selectedCampaignId && (
-              <button 
-                className="btn-deploy" 
+
+            {/* Launch Campaign Button — only shown when an existing campaign is selected */}
+            {csvMode === 'existing' && selectedCampaignId && (
+              <button
+                id="csv-launch-btn"
+                className="btn-deploy"
                 style={{ background: 'var(--accent-green)', marginTop: 'var(--space-md)' }}
                 onClick={handleLaunchToCampaign}
                 disabled={loading}

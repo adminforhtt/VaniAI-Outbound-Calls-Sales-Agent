@@ -40,17 +40,23 @@ def suggest_next_step(interest: str) -> str:
 
 def wait_for_hermes(lead_id: int, db: Session, timeout: int = HERMES_WAIT_TIMEOUT) -> bool:
     """
-    Polls the database for up to `timeout` seconds waiting for Hermes to finish enrichment.
-    Returns True if enriched, False if timed out (call proceeds with generic script).
+    Polls the database for up to `timeout` seconds waiting for enrichment to finish.
+    Returns immediately (True = proceed) if enrichment is 'enriched' or 'failed'.
+    Call always proceeds — we never block longer than timeout.
     """
     start = time.time()
     while time.time() - start < timeout:
-        db.refresh(db.query(Lead).filter(Lead.id == lead_id).first())
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
-        if lead and lead.enrichment_status == "enriched":
-            logger.info(f"HERMES_GATE: Lead {lead_id} enriched in {time.time() - start:.1f}s")
+        if not lead:
+            return False
+        db.refresh(lead)
+        if lead.enrichment_status == "enriched":
+            logger.info(f"HERMES_GATE: Lead {lead_id} enriched in {time.time() - start:.1f}s — proceeding")
             return True
-        time.sleep(1)
+        if lead.enrichment_status == "failed":
+            logger.warning(f"HERMES_GATE: Lead {lead_id} enrichment failed — proceeding with generic script")
+            return False
+        time.sleep(0.5)
     logger.warning(f"HERMES_GATE: Lead {lead_id} timed out after {timeout}s — proceeding with generic script")
     return False
 
