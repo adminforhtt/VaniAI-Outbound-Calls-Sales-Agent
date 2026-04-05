@@ -24,6 +24,15 @@ class CampaignBase(BaseModel):
 class CampaignCreate(CampaignBase):
     pass
 
+class CampaignUpdate(BaseModel):
+    name: Optional[str] = None
+    script_template: Optional[str] = None
+    language: Optional[str] = None
+    llm_provider: Optional[str] = None
+    voice: Optional[str] = None
+    goal: Optional[str] = None
+    active: Optional[bool] = None
+
 class CampaignResponse(CampaignBase):
     id: int
     tenant_id: Optional[int] = None

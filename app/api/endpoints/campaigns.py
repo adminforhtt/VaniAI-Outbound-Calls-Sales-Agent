@@ -28,6 +28,20 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db), tenant_id: int
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
 
+@router.patch("/{campaign_id}", response_model=CampaignResponse)
+def update_campaign(campaign_id: int, campaign_update: CampaignUpdate, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
+    db_campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.tenant_id == tenant_id).first()
+    if not db_campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    update_data = campaign_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_campaign, key, value)
+    
+    db.commit()
+    db.refresh(db_campaign)
+    return db_campaign
+
 @router.post("/{campaign_id}/launch")
 def launch_campaign(campaign_id: int, db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.tenant_id == tenant_id).first()
