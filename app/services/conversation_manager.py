@@ -4,6 +4,8 @@ import logging
 import base64
 import time
 import random
+
+logger = logging.getLogger(__name__)
 from fastapi import WebSocket, WebSocketDisconnect
 from app.services.stt import SarvamStreamingSTT
 from app.services.llm import LLMService
