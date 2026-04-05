@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    # Supabase Specific
-    SUPABASE_URL: str = ""
-    SUPABASE_ANON_KEY: str = ""
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    # Supabase Specific (Hardcoded fallbacks for Demo Stability)
+    SUPABASE_URL: str = "https://nqgjtartntbyhipafjjf.supabase.co"
+    SUPABASE_ANON_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xZ2p0YXJ0bnRieWhpcGFmampmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMDM2MDEsImV4cCI6MjA5MDc3OTYwMX0.DVsmcoBnYKnDs5513kqYMzk-zsiewz6ri06WzDigsaA"
+    SUPABASE_SERVICE_ROLE_KEY: str = "" # User must still provide this in Railway!
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
