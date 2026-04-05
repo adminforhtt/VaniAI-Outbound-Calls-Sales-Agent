@@ -185,24 +185,38 @@ def initiate_test_call(request: TestCallRequest, background_tasks: BackgroundTas
 async def voice_webhook(request: Request):
     """
     Twilio posts here when a call connects. We respond with TwiML to start a WebSocket stream.
+    HARDENED: Returns safety TwiML even if Redis/DB is struggling.
     """
-    form_data = await request.form()
-    call_sid = form_data.get("CallSid")
-    
-    # Initialize session and state
-    await redis_client.save_session(call_sid, {"history": [], "state": "INIT"})
+    try:
+        form_data = await request.form()
+        call_sid = form_data.get("CallSid")
+        
+        # Initialize session and state (Non-blocking fallback)
+        try:
+            await redis_client.save_session(call_sid, {"history": [], "state": "INIT"})
+        except Exception as e:
+            logger.warning(f"RESILIENCE: Redis session init failed for {call_sid}: {e}")
 
-    base_url = settings.BASE_URL.rstrip('/')
-    ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://") + f"/api/calls/stream/{call_sid}"
-    
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-    <Response>
-        <Connect>
-            <Stream url="{ws_url}" />
-        </Connect>
-    </Response>
-    """
-    return Response(content=twiml, media_type="application/xml")
+        base_url = settings.BASE_URL.rstrip('/')
+        ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://") + f"/api/calls/stream/{call_sid}"
+        
+        logger.info(f"VOICE_WEBHOOK: Connection from {call_sid}. Streaming to {ws_url}")
+
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Connect>
+                <Stream url="{ws_url}" />
+            </Connect>
+        </Response>
+        """
+        return Response(content=twiml, media_type="application/xml")
+    except Exception as e:
+        logger.error(f"FATAL_WEBHOOK_ERROR: {e}")
+        # Return a very basic TwiML so Twilio doesn't just hang up with a 500
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response><Say>Connecting to Vani AI.</Say><Pause length="2"/><Hangup/></Response>',
+            media_type="application/xml"
+        )
 
 @router.websocket("/stream/{call_sid}")
 async def call_stream(websocket: WebSocket, call_sid: str):
