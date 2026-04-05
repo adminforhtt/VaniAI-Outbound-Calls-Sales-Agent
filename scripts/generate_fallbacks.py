@@ -22,7 +22,7 @@ for lang_code, (short_code, text) in FALLBACKS.items():
             "https://api.sarvam.ai/text-to-speech",
             headers={"API-Subscription-Key": SARVAM_API_KEY},
             json={"inputs": [text], "target_language_code": lang_code,
-                  "speaker": "meera", "model": "bulbul:v1",
+                  "speaker": "priya", "model": "bulbul:v3",
                   "enable_preprocessing": True}
         )
         resp.raise_for_status()

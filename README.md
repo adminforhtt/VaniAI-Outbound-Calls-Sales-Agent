@@ -120,3 +120,6 @@ Access our interactive Swagger documentation at `BASE_URL/docs` once the server 
   <b>Vani AI: Empowering the Next Generation of Intelligent Voice Pipelines.</b><br>
   <i>Built for scale. Built for conversion.</i>
 </div>
+## Testing
+Integration tests live in tests/. Do not use the legacy test_api.py — it has been removed.
+STT is handled by Groq Whisper (REST). Use pytest tests/integration/ for end-to-end coverage.

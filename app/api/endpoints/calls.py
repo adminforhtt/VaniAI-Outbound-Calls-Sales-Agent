@@ -89,7 +89,7 @@ def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = 
     # 2. Trigger Enrichment if not already done (non-blocking — call always proceeds)
     if lead.enrichment_status == "pending":
         try:
-            from app.workers.celery_app import enrich_lead_task
+            from app.worker.tasks import enrich_lead_task
             enrich_lead_task.delay(lead.id)
             wait_for_hermes(lead.id, db)
         except Exception as e:
@@ -155,7 +155,7 @@ def initiate_test_call(request: TestCallRequest, background_tasks: BackgroundTas
     # to completely eliminate the risk of Celery/Redis blocking the main API thread
     def _trigger_enrichment(lead_id):
         try:
-            from app.workers.celery_app import enrich_lead_task
+            from app.worker.tasks import enrich_lead_task
             enrich_lead_task.delay(lead_id)
         except Exception as e:
             logger.warning(f"Background enrichment failed: {e}")
@@ -283,7 +283,7 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
             
             # Queue background task for qualification (non-fatal if Celery is down)
             try:
-                from app.workers.celery_app import score_lead_task
+                from app.worker.tasks import score_lead_task
                 background_tasks.add_task(score_lead_task.delay, call_sid, transcript)
             except Exception as e:
                 logger.warning(f"Lead scoring skipped (Celery/Redis unavailable): {e}")
