@@ -220,7 +220,13 @@ async def voice_webhook(request: Request):
 
 @router.websocket("/stream/{call_sid}")
 async def call_stream(websocket: WebSocket, call_sid: str):
-    await websocket.accept()
+    try:
+        await websocket.accept()
+        logger.info(f"✅ WEBSOCKET_ACCEPTED: Connection established for SID {call_sid}")
+    except Exception as e:
+        logger.error(f"❌ WEBSOCKET_ACCEPT_FAILED: Handshake failed for SID {call_sid}: {e}")
+        return
+
     logger.info(f"WebSocket connected for call {call_sid}")
     
     manager = ConversationManager(websocket, call_sid)
