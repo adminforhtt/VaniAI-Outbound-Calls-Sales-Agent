@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useToast } from '../hooks/useToast';
+import { ToastContainer } from './ToastContainer';
 
 interface ActivityLog {
   type: string;
@@ -23,6 +25,7 @@ function HermesConsole({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
   const [evolveLoading, setEvolveLoading] = useState(false);
   const [evolveMessage, setEvolveMessage] = useState('');
+  const { toasts, showToast, dismissToast } = useToast();
 
   const API = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -72,7 +75,7 @@ function HermesConsole({ token }: { token: string }) {
 
   const handleForceEvolve = async () => {
     if (!selectedCampaignId) {
-      alert('Please select a campaign first.');
+      showToast('Please select a campaign first.', 'error');
       return;
     }
     setEvolveLoading(true);
@@ -292,6 +295,7 @@ function HermesConsole({ token }: { token: string }) {
           )}
         </div>
       </section>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

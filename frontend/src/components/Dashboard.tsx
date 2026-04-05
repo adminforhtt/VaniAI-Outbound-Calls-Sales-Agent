@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { validateAndFormatPhone } from '../utils/phoneUtils';
+import { useToast } from '../hooks/useToast';
+import { ToastContainer } from './ToastContainer';
 
 interface Lead {
   id: number;
@@ -15,7 +18,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [loading, setLoading] = useState(false);
   const [reportModal, setReportModal] = useState<any>(null);
   const [researchData, setResearchData] = useState<any>(null);
-  const [showToast, setShowToast] = useState(false);
+
 
   // Agent config state
   const [llmProvider, setLlmProvider] = useState('groq');
@@ -35,7 +38,10 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [csvMode, setCsvMode] = useState<'existing' | 'custom'>('existing');
 
   // Quick test
-  const [testPhone, setTestPhone] = useState('');
+  const { toasts, showToast, dismissToast } = useToast();
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [isCallLoading, setIsCallLoading] = useState(false);
 
   const API = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -77,42 +83,60 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       fetchLeads();
       
       // Show success toast feedback
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      showToast('Success!', 'success');
       
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
-  const handleTestCall = async () => {
-    if (!testPhone) return;
-    setLoading(true);
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setPhoneInput(val);
+    if (phoneError) setPhoneError(null);
+  };
+
+  const handleQuickCall = async () => {
+    const validation = validateAndFormatPhone(phoneInput);
+    if (!validation.isValid) {
+      setPhoneError(validation.error);
+      return;
+    }
+  
+    if (validation.detectedCountry && validation.detectedCountry !== 'IN') {
+      const confirmed = window.confirm(
+        `This will dial an international number: ${validation.displayFormat} (${validation.detectedCountry}). Continue?`
+      );
+      if (!confirmed) return;
+    }
+  
+    setIsCallLoading(true);
     try {
-      let phone = testPhone.trim();
-      if (!phone.startsWith('+')) phone = '+' + phone;
-      const res = await fetch(`${API}/calls/test-call`, {
+      const response = await fetch(`${API}/calls/test-call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          phone_number: phone,
-          script: script || 'Hello, this is a test call from Vani AI.',
-          llm_provider: llmProvider,
+          phone_number: validation.e164,
+          script: script || 'Hello, this is a test call from Vani AI.', // preserve the default script
+          llm_provider: llmProvider, // preserve config
           voice,
           language
         }),
       });
-      if (res.ok) {
-        setTestPhone('');
-        fetchLeads();
-      } else {
-        const err = await res.json();
-        alert(`Call failed: ${err.detail || 'Unknown error'}`);
+  
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error: ${response.status}`);
       }
-    } catch (e: any) {
-      console.error(e);
-      alert(`Network/Parse Error: ${e.message || 'Unknown network error'}`);
+  
+      fetchLeads();
+      showToast(`✅ Call initiated to ${validation.displayFormat}`, 'success');
+      setPhoneInput('');
+  
+    } catch (err: any) {
+      showToast(err.message || 'Failed to initiate call. Please try again.', 'error');
+    } finally {
+      setIsCallLoading(false);
     }
-    setLoading(false);
   };
 
   const downloadTranscript = (leadName: string, transcript: string) => {
@@ -138,7 +162,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         data.callSid = callSid;
         setReportModal(data);
       } else {
-        alert('Report generating... Wait for the call to finish.');
+        showToast('Report generating... Wait for the call to finish.', 'warning');
       }
     } catch (e) { console.error(e); }
   };
@@ -146,11 +170,11 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const handleCsvUpload = async () => {
     if (!csvFile) return;
     if (csvMode === 'existing' && !selectedCampaignId) {
-      alert('Please select a campaign or switch to "Custom Description" mode.');
+      showToast('Please select a campaign or switch to "Custom Description" mode.', 'error');
       return;
     }
     if (csvMode === 'custom' && !csvCustomScript.trim()) {
-      alert('Please enter a custom agent description.');
+      showToast('Please enter a custom agent description.', 'error');
       return;
     }
     setLoading(true);
@@ -174,16 +198,15 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       });
       if (res.ok) {
         const data = await res.json();
-        alert(`${data.message}${data.campaign_id ? `\nCreated/assigned to Campaign #${data.campaign_id}` : ''}`);
+        showToast(`${data.message}${data.campaign_id ? `\nCreated/assigned to Campaign #${data.campaign_id}` : ''}`, 'success');
         setCsvFile(null);
         setCsvCustomScript('');
         setCsvCustomName('');
         fetchLeads();
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
+        showToast('Success!', 'success');
       } else {
         const err = await res.json();
-        alert(`Upload failed: ${err.detail || 'Unknown error'}`);
+        showToast(`Upload failed: ${err.detail || 'Unknown error'}`, 'error');
       }
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -198,7 +221,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        alert('Campaign Launch Successful! Hermes is now dialing all pending leads.');
+        showToast('Campaign Launch Successful! Hermes is now dialing all pending leads.', 'success');
         fetchLeads();
       }
     } catch (e) { console.error(e); }
@@ -221,7 +244,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        alert("Hermes Agent has been dispatched to research this lead!");
+        showToast('Hermes Agent has been dispatched to research this lead!', 'success');
         fetchLeads();
       }
     } catch (e) { console.error(e); }
@@ -280,19 +303,29 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
           <div className="dialer-card">
             <h4>⚡ Quick Test</h4>
             <p>Dial a number to instantly test the agent with the current configuration.</p>
-            <div className="dialer-row">
-              <input
-                className="dialer-input"
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-                placeholder="+91..."
-              />
+            <div className="dialer-row" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ position: 'relative', width: '100%' }}>
+                <input
+                  className="dialer-input"
+                  style={{ width: '100%', borderColor: phoneError ? '#ef4444' : undefined }}
+                  type="tel"
+                  value={phoneInput}
+                  onChange={handlePhoneChange}
+                  placeholder="9307201890 or +91XXXXXXXXXX"
+                  aria-invalid={!!phoneError}
+                />
+                {phoneError && (
+                  <p role="alert" style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>
+                    {phoneError}
+                  </p>
+                )}
+              </div>
               <button
                 className="btn-dial"
-                disabled={loading || !testPhone}
-                onClick={handleTestCall}
+                disabled={isCallLoading || !phoneInput.trim()}
+                onClick={handleQuickCall}
               >
-                Dial
+                {isCallLoading ? 'Initiating...' : 'Dial'}
               </button>
             </div>
           </div>
@@ -777,30 +810,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         </div>
       )}
 
-      {/* ── SUCCESS TOAST ── */}
-      {showToast && (
-        <div style={{
-          position: 'fixed',
-          bottom: '24px',
-          right: '24px',
-          background: 'var(--accent-purple)',
-          color: 'white',
-          padding: '12px 24px',
-          borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          fontWeight: 600,
-          zIndex: 1000,
-          animation: 'pulse 0.5s ease-out'
-        }}>
-          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-          </svg>
-          Agent Context Updated Successfully!
-        </div>
-      )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

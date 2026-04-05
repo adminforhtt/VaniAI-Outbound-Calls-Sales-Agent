@@ -8,9 +8,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -37,12 +36,21 @@ app.include_router(hermes.router, prefix="/api/hermes", tags=["Hermes"])
 async def startup_event():
     logger.info(f"Starting up Vani AI for Production (Env: {settings.ENVIRONMENT})")
 
-@app.get("/health")
-async def health_check():
-    """Health check for Railway/AWS/Vercel deployments."""
-    return {
-        "status": "ok", 
-        "service": "vania-ai-backend",
-        "environment": settings.ENVIRONMENT,
-        "version": settings.VERSION
-    }
+@app.on_event("startup")
+async def run_db_migrations():
+    """
+    Run pending Alembic migrations on every startup.
+    This is safe — Alembic tracks which migrations have run via alembic_version table.
+    No-op if already at head. Never runs a migration twice.
+    """
+    try:
+        logger.info("Running Alembic migrations...")
+        alembic_cfg = AlembicConfig("alembic.ini")
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("✅ DB migrations complete — at head.")
+    except Exception as e:
+        logger.critical(f"❌ DB migration failed on startup: {e}")
+        raise  # crash startup if migrations fail — better than silent data corruption
+
+from app.api.endpoints.health import router as health_router
+app.include_router(health_router)

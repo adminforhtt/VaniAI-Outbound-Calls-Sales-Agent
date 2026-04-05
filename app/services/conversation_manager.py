@@ -21,7 +21,12 @@ from app.services.prompt_builder import (
     fallback_response
 )
 
-logger = logging.getLogger(__name__)
+import re
+import os
+from app.services.exceptions import (
+    STTBufferException, CampaignLoadException,
+    TTSGenerationException, LLMInferenceException, TwilioStreamException
+)
 
 # ── FILLER WORDS: skip LLM/TTS entirely ──
 FILLER_WORDS = {
@@ -46,42 +51,158 @@ LANGUAGE_NAMES = {
 import re
 
 # ── PROBLEM 2: CLEAN LLM FOR TTS ──
-def clean_llm_for_tts(text: str, max_chars: int = 250) -> str:
-    """
-    1. Strip leading greetings
-    2. Truncate at a sentence boundary (not mid-word)
-    3. Ensure it ends cleanly
-    """
-    # Step 1: strip leading greeting patterns
-    text = re.sub(
-        r'^(नमस्कार[!,]?\s*|हॅलो[!,]?\s*|नमस्ते[!,]?\s*|'
-        r'मी उत्तर देण्याचा प्रयत्न करेन[.|,]?\s*|'
-        r'नमस्कार! मी तुमच्या प्रश्नाचा उत्तर देण्याचा प्रयत्न करेन[.|,]?\s*)',
-        '', text, flags=re.UNICODE
-    ).strip()
+import re
+from typing import Optional
 
-    # Step 2: if under limit, return as-is
+# ── Sentence boundary patterns for all supported languages ──────────────────
+# Devanagari (Hindi, Marathi): ।  Double danda: ॥
+# Tamil: ।, .  Telugu: ।, .  Bengali: ।, .
+_HARD_SENTENCE_BREAKS = re.compile(r'(?<=[.!?।॥])\s+')
+_SOFT_CLAUSE_BREAKS = re.compile(r'(?<=[,;:])\s+')
+
+def clean_llm_for_tts(
+    text: str,
+    max_chars: int = 180,
+    ellipsis: str = "..."
+) -> str:
+    """
+    Safely prepare LLM output for TTS generation.
+
+    Truncation priority (highest to lowest):
+    1. Hard sentence boundary (. ! ? । ॥)
+    2. Soft clause boundary (, ; :)
+    3. Word boundary (space)
+    4. Hard character cut (last resort — should almost never happen)
+
+    All truncated text gets an ellipsis so TTS generates a natural trailing tone.
+    Also strips markdown, code blocks, HTML tags, and emoji.
+    """
+    if not text:
+        return ""
+
+    # ── Step 1: Strip formatting noise ──────────────────────────────────────
+    # Remove markdown formatting
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)       # **bold**
+    text = re.sub(r'\*(.+?)\*', r'\1', text)            # *italic*
+    text = re.sub(r'`(.+?)`', r'\1', text)              # `code`
+    text = re.sub(r'#{1,6}\s+', '', text)               # # headings
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [link](url)
+    text = re.sub(r'<[^>]+>', '', text)                  # HTML tags
+
+    # Remove code blocks
+    text = re.sub(r'```[\s\S]*?```', '', text)
+
+    # Remove emoji (basic Unicode ranges)
+    text = re.sub(
+        r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF'
+        r'\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF'
+        r'\u2600-\u26FF\u2700-\u27BF]', '', text
+    )
+
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # ── Step 2: Return as-is if within limit ────────────────────────────────
     if len(text) <= max_chars:
         return text
 
-    # Step 3: truncate at last sentence boundary before max_chars
-    truncated = text[:max_chars]
-    # Find last sentence-ending punctuation (।  .  !  ?)
-    last_end = max(
-        truncated.rfind('।'),
-        truncated.rfind('.'),
-        truncated.rfind('!'),
-        truncated.rfind('?'),
-    )
-    if last_end > 50:  # only truncate there if it's not too short
-        return text[:last_end + 1].strip()
+    # ── Step 3: Find best truncation point ──────────────────────────────────
+    search_window = text[:max_chars]
 
-    # Step 4: fallback — truncate at last space
-    last_space = truncated.rfind(' ')
-    if last_space > 50:
-        return text[:last_space].strip() + '।'
+    # Priority 1: Hard sentence break (. ! ? । ॥)
+    sentence_positions = [
+        search_window.rfind('.'),
+        search_window.rfind('!'),
+        search_window.rfind('?'),
+        search_window.rfind('।'),
+        search_window.rfind('॥'),
+    ]
+    best_sentence = max(p for p in sentence_positions)
 
-    return truncated.strip()
+    # Only use sentence break if it's past 40% of max_chars (avoids tiny fragments)
+    if best_sentence > max_chars * 0.40:
+        return text[:best_sentence + 1].strip()
+
+    # Priority 2: Soft clause break (, ; :)
+    clause_positions = [
+        search_window.rfind(','),
+        search_window.rfind(';'),
+        search_window.rfind(':'),
+    ]
+    best_clause = max(p for p in clause_positions)
+
+    if best_clause > max_chars * 0.35:
+        return text[:best_clause].strip() + ellipsis
+
+    # Priority 3: Word boundary (space)
+    last_space = search_window.rfind(' ')
+    if last_space > max_chars * 0.30:
+        return text[:last_space].strip() + ellipsis
+
+    # Priority 4: Hard cut (last resort)
+    return text[:max_chars].strip() + ellipsis
+
+
+def split_text_for_streaming_tts(
+    text: str,
+    max_chunk_chars: int = 100
+) -> list[str]:
+    """
+    Split cleaned LLM output into sentence-sized chunks for streaming TTS.
+    Each chunk generates one TTS audio segment.
+
+    Use this instead of clean_llm_for_tts() when implementing streaming TTS.
+    Chunks are split at sentence boundaries, falling back to clause boundaries.
+    """
+    text = clean_llm_for_tts(text, max_chars=99999)  # clean but don't truncate
+
+    if len(text) <= max_chunk_chars:
+        return [text] if text else []
+
+    # Split on hard sentence boundaries first
+    raw_sentences = _HARD_SENTENCE_BREAKS.split(text)
+    chunks = []
+    current_chunk = ""
+
+    for sentence in raw_sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if len(current_chunk) + len(sentence) + 1 <= max_chunk_chars:
+            current_chunk += (" " if current_chunk else "") + sentence
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            # If a single sentence exceeds max_chunk_chars, split at clauses
+            if len(sentence) > max_chunk_chars:
+                sub_chunks = _split_at_clauses(sentence, max_chunk_chars)
+                chunks.extend(sub_chunks[:-1])
+                current_chunk = sub_chunks[-1] if sub_chunks else ""
+            else:
+                current_chunk = sentence
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return [c for c in chunks if c.strip()]
+
+
+def _split_at_clauses(text: str, max_chars: int) -> list[str]:
+    """Split a single long sentence at clause boundaries."""
+    parts = _SOFT_CLAUSE_BREAKS.split(text)
+    result = []
+    current = ""
+    for part in parts:
+        if len(current) + len(part) + 1 <= max_chars:
+            current += (" " if current else "") + part
+        else:
+            if current:
+                result.append(current)
+            current = part
+    if current:
+        result.append(current)
+    return result if result else [text[:max_chars]]
 
 # ── PROBLEM 3: STATE MACHINE LOGIC ──
 GOODBYE_SIGNALS = {
@@ -338,6 +459,16 @@ class ConversationManager:
             get_cached_audio_func=self._get_cached_audio
         )
 
+        self._fallback_audio_cache: dict[str, str] = {}
+        fallback_dir = os.path.join(os.path.dirname(__file__), "../../assets/fallbacks")
+        for lang_code in ["hi", "mr", "ta", "te", "bn", "en"]:
+            fallback_path = os.path.join(fallback_dir, f"fallback_{lang_code}.wav")
+            if os.path.exists(fallback_path):
+                with open(fallback_path, "rb") as f:
+                    self._fallback_audio_cache[lang_code] = base64.b64encode(f.read()).decode()
+            else:
+                logger.warning(f"[ConversationManager] Missing fallback audio for lang: {lang_code}")
+
     def _get_cached_audio(self, filler_key: str) -> bytes:
         import os
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -411,74 +542,102 @@ class ConversationManager:
             await self.stt.stop()
 
     async def receive_from_twilio(self):
+        logger.info(f"[receive_from_twilio] Stream loop started. Call SID: {self.call_sid}")
         try:
-            while True:
-                message = await self.websocket.receive_text()
-                data = json.loads(message)
-                event = data.get("event")
+            async for raw_message in self.websocket.iter_text():
+                try:
+                    data = json.loads(raw_message)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[receive_from_twilio] Malformed JSON frame: {e}. Skipping.")
+                    continue  
 
-                if event == "start":
-                    self.stream_sid = data.get("streamSid")
-                    logger.info(f"Stream started: {self.stream_sid}")
-                    if not self.has_greeted:
-                        # Load campaign context FIRST
-                        await self._initialize_campaign_context()
-                        self.stt.language = self.language
-                        
-                        # ── DYNAMIC GREETING: Generate live via TTS using campaign name ──
-                        lang_name = LANGUAGE_NAMES.get(self.language, "Hindi")
-                        FEMALE_VOICES = {"priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
-                                         "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
-                                         "shruti", "suhani", "kavitha", "rupali", "female"}
-                        agent_name = "Vani" if self.voice in FEMALE_VOICES else "Arjun"
-                        
-                        # Build a short, natural greeting in the campaign language
-                        if self.language.startswith("en"):
-                            greeting_text = f"Hello! I am {agent_name}, calling from {self.company_name} regarding {self.campaign_name}. How are you today?"
-                        elif self.language.startswith("hi"):
-                            greeting_text = f"नमस्कार! मैं {agent_name} बोल रही हूँ, {self.company_name} से {self.campaign_name} के बारे में। आप कैसे हैं?"
-                        elif self.language.startswith("mr"):
-                            greeting_text = f"नमस्कार! मी {agent_name}, {self.company_name} मधून {self.campaign_name} बद्दल बोलत आहे. तुम्ही कसे आहात?"
-                        else:
-                            # Fallback: use Hindi greeting for other Indic languages
-                            greeting_text = f"नमस्कार! मैं {agent_name}, {self.company_name} से {self.campaign_name} के बारे में बात कर रही हूँ।"
-                        
-                        logger.info(f"DYNAMIC_GREETING: Generating TTS for: {greeting_text}")
-                        
-                        try:
-                            greeting_audio = await asyncio.wait_for(
-                                TTSService.generate_speech(greeting_text, language=self.language, speaker=self.voice),
-                                timeout=15.0
-                            )
-                        except Exception as e:
-                            logger.error(f"GREETING_TTS_FAILED: {e}")
-                            greeting_audio = b""
-                        
-                        if not greeting_audio or len(greeting_audio) == 0:
-                            # Fallback to cached/silence if TTS fails
-                            greeting_audio = self._get_cached_audio("greeting")
-                            if not greeting_audio:
-                                greeting_audio = self._get_fallback_audio()
-                            
-                        await self.send_audio_safe(greeting_audio)
-                        self.last_agent_speech_time = time.time()
-                        
-                        self._session_cache["history"].append({"role": "assistant", "content": greeting_text})
-                        self._session_cache["conversation_stage"] = "GREETING"
-                        self.has_greeted = True
+                event = data.get("event", "")
 
-                elif event == "media":
-                    payload = data["media"]["payload"]
-                    audio_bytes = base64.b64decode(payload)
-                    await self.stt.push_chunk(audio_bytes)
-
-                elif event == "stop":
-                    logger.info("Call stopped by Twilio.")
+                if event == "stop":
+                    logger.info("[receive_from_twilio] Twilio stop event received. Exiting loop.")
                     break
+                elif event == "connected":
+                    logger.info("[receive_from_twilio] Twilio WebSocket connected.")
+                    continue
+                elif event == "start":
+                    try:
+                        await self._handle_stream_start(data)
+                    except CampaignLoadException as e:
+                        logger.error(f"[stream_start] Campaign load failed: {e}")
+                        await self.send_audio_safe(b"") # fallback via send_audio_safe
+                    except Exception as e:
+                        logger.exception(f"[stream_start] Unexpected error: {e}")
+                        await self.send_audio_safe(b"") # fallback via send_audio_safe
+                    continue
+                elif event == "media":
+                    try:
+                        await self._handle_media_chunk(data)
+                    except KeyError as e:
+                        logger.warning(f"[media] Missing key: {e}. Frame skipped.")
+                        continue  
+                    except STTBufferException as e:
+                        logger.error(f"[media] STT buffer error: {e}")
+                        await self.send_audio_safe(b"")
+                        continue
+                    except TwilioStreamException as e:
+                        logger.critical(f"[media] Fatal Twilio stream error: {e}. Exiting loop.")
+                        break
+                    except Exception as e:
+                        logger.exception(f"[media] Unhandled exception (kept alive): {e}")
+                        await self.send_audio_safe(b"")
+                        continue
+                else:
+                    logger.debug(f"[receive_from_twilio] Unknown event '{event}'. Ignoring.")
+                    continue
         except WebSocketDisconnect:
             logger.info("Twilio disconnected.")
         except Exception as e:
-            logger.error(f"Error in receive_from_twilio: {e}")
+            logger.exception(f"Fatal error in receive_from_twilio loop: {e}")
+            
+    async def _handle_stream_start(self, data):
+        self.stream_sid = data.get("streamSid")
+        if not self.stream_sid:
+            raise CampaignLoadException("streamSid missing from start event")
+        logger.info(f"Stream started: {self.stream_sid}")
+        if not self.has_greeted:
+            await self._initialize_campaign_context()
+            self.stt.language = self.language
+            lang_name = LANGUAGE_NAMES.get(self.language, "Hindi")
+            FEMALE_VOICES = {"priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
+                             "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
+                             "shruti", "suhani", "kavitha", "rupali", "female"}
+            agent_name = "Vani" if self.voice in FEMALE_VOICES else "Arjun"
+            if self.language.startswith("en"):
+                greeting_text = f"Hello! I am {agent_name}, calling from {self.company_name} regarding {self.campaign_name}. How are you today?"
+            elif self.language.startswith("hi"):
+                greeting_text = f"नमस्कार! मैं {agent_name} बोल रही हूँ, {self.company_name} से {self.campaign_name} के बारे में। आप कैसे हैं?"
+            elif self.language.startswith("mr"):
+                greeting_text = f"नमस्कार! मी {agent_name}, {self.company_name} मधून {self.campaign_name} बद्दल बोलत आहे. तुम्ही कसे आहात?"
+            else:
+                greeting_text = f"नमस्कार! मैं {agent_name}, {self.company_name} से {self.campaign_name} के बारे में बात कर रही हूँ।"
+            logger.info(f"DYNAMIC_GREETING: Generating TTS for: {greeting_text}")
+            try:
+                greeting_audio = await asyncio.wait_for(
+                    TTSService.generate_speech(greeting_text, language=self.language, speaker=self.voice),
+                    timeout=15.0
+                )
+            except Exception as e:
+                logger.error(f"GREETING_TTS_FAILED: {e}")
+                greeting_audio = b""
+            if not greeting_audio or len(greeting_audio) == 0:
+                greeting_audio = self._get_cached_audio("greeting")
+                if not greeting_audio:
+                    greeting_audio = self._get_fallback_audio()
+            await self.send_audio_safe(greeting_audio)
+            self.last_agent_speech_time = time.time()
+            self._session_cache["history"].append({"role": "assistant", "content": greeting_text})
+            self._session_cache["conversation_stage"] = "GREETING"
+            self.has_greeted = True
+
+    async def _handle_media_chunk(self, data):
+        payload = data["media"]["payload"]
+        audio_bytes = base64.b64decode(payload)
+        await self.stt.push_chunk(audio_bytes)
 
     async def process_stt_stream_loop(self):
         """Handles both partial and final STT transcripts."""
@@ -574,11 +733,20 @@ class ConversationManager:
 
     def _get_fallback_audio(self) -> bytes:
         """Get fallback audio from cache, with hard fallback to silence."""
+        lang = getattr(self, "language", "hi-IN")
+        short_lang = lang.split("-")[0]
+        
+        fallback_b64 = self._fallback_audio_cache.get(short_lang) or \
+                       self._fallback_audio_cache.get("hi") or \
+                       self._fallback_audio_cache.get("en")
+                       
+        if fallback_b64:
+            return base64.b64decode(fallback_b64)
+            
         audio = self._get_cached_audio("fallback")
         if audio:
             return audio
             
-        # Try generic Hindi fallback if specific language is missing
         generic = self._get_cached_audio("hi-IN")
         if generic:
             return generic
@@ -756,33 +924,27 @@ class ConversationManager:
 
             self.last_agent_speech_time = time.time()
             
-            async def safe_tts(text: str) -> bytes:
-                try:
-                    response = await asyncio.wait_for(
-                        TTSService.generate_speech(text, language=self.language, speaker=self.voice),
-                        timeout=15.0
-                    )
-                    if not response or len(response) == 0:
-                        raise Exception("Empty TTS output")
-                    logger.info("TTS_SUCCESS")
-                    return response
-                except Exception as e:
-                    logger.error(f"TTS FAILED: {e}")
-                    logger.info("FALLBACK_USED")
-                    return self._get_fallback_audio()
-            
             async def state_update_routine():
                 self._session_cache["history"] = history[-5:] + [{"role": "assistant", "content": valid_response}]
                 await redis_client.save_session(self.call_sid, self._session_cache)
                 logger.info("STATE_UPDATE = Completed Async")
                 
             async def tts_send_routine():
-                audio = await safe_tts(valid_response)
-                await self.send_audio_safe(audio)
-                
-                e2e_ms = int((time.time() - turn_start) * 1000)
-                logger.info(f"⏱ E2E_LATENCY_MS={e2e_ms} (turn start → one TTS call)")
-                self.last_agent_speech_time = time.time()
+                first_chunk = True
+                try:
+                    async for audio_chunk in TTSService.generate_speech_streaming(valid_response, language=self.language, speaker=self.voice):
+                        await self.send_audio_safe(audio_chunk)
+                        
+                        if first_chunk:
+                            e2e_ms = int((time.time() - turn_start) * 1000)
+                            logger.info(f"⏱ E2E_LATENCY_MS={e2e_ms} (turn start → first TTS chunk)")
+                            first_chunk = False
+                            
+                        self.last_agent_speech_time = time.time()
+                except Exception as e:
+                    logger.error(f"Streaming TTS FAILED: {e}")
+                    logger.info("FALLBACK_USED")
+                    await self.send_audio_safe(self._get_fallback_audio())
                     
             try:
                 # PARALLEL EXECUTION

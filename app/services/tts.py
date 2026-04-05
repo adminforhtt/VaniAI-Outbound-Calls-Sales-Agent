@@ -259,4 +259,30 @@ class TTSService:
             logger.error(f"Error in TTS generation (speaker={speaker}): {e} | Response: {err_body}")
             return b""
 
+    @staticmethod
+    async def generate_speech_streaming(text: str, language: str = "hi-IN", speaker: str = "priya"):
+        from app.services.conversation_manager import split_text_for_streaming_tts
+        import asyncio
+        
+        chunks = split_text_for_streaming_tts(text, max_chunk_chars=90)
+        if not chunks:
+            return
 
+        # Fire all TTS requests concurrently
+        tasks = [
+            asyncio.create_task(TTSService.generate_speech(chunk, language, speaker))
+            for chunk in chunks
+        ]
+
+        # Yield results IN ORDER as each future completes
+        for task in tasks:
+            try:
+                audio_bytes = await task
+                if audio_bytes:
+                    yield audio_bytes
+                else:
+                    # 0.5s mulaw silence
+                    yield bytes([0x7F] * 4000)
+            except Exception as e:
+                logger.error(f"[TTS streaming] Chunk failed: {e}. Yielding silence.")
+                yield bytes([0x7F] * 4000)
