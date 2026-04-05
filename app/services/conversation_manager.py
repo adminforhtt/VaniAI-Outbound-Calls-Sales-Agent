@@ -525,9 +525,11 @@ class ConversationManager:
                             self.campaign_prompt = campaign.script_template or self.campaign_prompt
                             self.llm_provider = getattr(campaign, "llm_provider", "groq")
                             self.voice = getattr(campaign, "voice", "priya")
-                            # Only overwrite lead language if it's explicitly set in campaign and not in lead
-                            if not lead.language:
-                                self.language = getattr(campaign, "language", "hi-IN")
+                            
+                            # CAMPAIGN WINS: If campaign has a language, use it over the lead default
+                            camp_lang = getattr(campaign, "language", None)
+                            if camp_lang:
+                                self.language = normalize_language_code(camp_lang)
                             
                             self.campaign_name = campaign.name or self.campaign_name
                             
@@ -535,7 +537,10 @@ class ConversationManager:
                             tenant = db.query(Tenant).filter(Tenant.id == campaign.tenant_id).first()
                             if tenant:
                                 self.company_name = tenant.name
-                            logger.info(f"Campaign loaded: name={self.campaign_name}, provider={self.llm_provider}, voice={self.voice}, lang={self.language}")
+                            
+                    # Final safety normalization
+                    self.language = normalize_language_code(self.language)
+                    logger.info(f"Campaign Loaded: name={self.campaign_name}, provider={self.llm_provider}, voice={self.voice}, lang={self.language}")
         except Exception as e:
             logger.error(f"Error initializing campaign context: {e}")
 
