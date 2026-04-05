@@ -188,12 +188,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       }
     } catch (e) { console.error(e); }
   };
-
-  const downloadTranscript = () => {
-    if (!reportModal?.callSid) return;
-    window.open(`${API}/calls/${reportModal.callSid}/transcript/download`, '_blank');
-  };
-
   // Computed stats
   const totalCalls = leads.length;
   const completedCalls = leads.filter((l) => l.status === 'completed').length;
