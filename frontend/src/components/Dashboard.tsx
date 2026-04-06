@@ -21,6 +21,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [loading, setLoading] = useState(false);
   const [reportModal, setReportModal] = useState<any>(null);
   const [researchData, setResearchData] = useState<any>(null);
+  const [showAllCalls, setShowAllCalls] = useState(false);
 
 
   // Agent config state
@@ -667,7 +668,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               </div>
             </div>
             <div className="calls-list">
-              {leads.slice(0, 8).map((lead) => (
+              {leads.slice(0, showAllCalls ? undefined : 8).map((lead) => (
                 <div className="call-item" key={lead.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: '12px', padding: '16px 0' }}>
                   {/* Column 1: Identity & Time */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
@@ -733,9 +734,9 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                 </div>
               )}
             </div>
-            {leads.length > 0 && (
-              <button className="view-all-btn">
-                See all calls →
+            {leads.length > 8 && (
+              <button className="view-all-btn" onClick={() => setShowAllCalls(!showAllCalls)}>
+                {showAllCalls ? 'Show less' : `See all ${leads.length} calls →`}
               </button>
             )}
           </div>
