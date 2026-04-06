@@ -1,6 +1,4 @@
-"""
-Prompt Builder: Constructs the final system prompt for live calls by merging
-campaign context with Hermes lead intelligence.
+campaign context.
 
 This module is the single source of truth for how the AI agent's personality,
 instructions, and contextual knowledge are assembled before every turn.
@@ -13,77 +11,7 @@ from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
-# Maximum characters for lead intelligence context to prevent token bloat
-MAX_LEAD_CONTEXT_CHARS = 1500  # ~375-500 tokens
 
-# Map BCP-47 codes to human-readable language names
-LANGUAGE_NAMES = {
-    "hi-IN": "Hindi", "en-IN": "English", "bn-IN": "Bengali",
-    "ta-IN": "Tamil", "te-IN": "Telugu", "mr-IN": "Marathi",
-    "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
-    "pa-IN": "Punjabi", "or-IN": "Odia",
-}
-
-FEMALE_VOICES = {
-    "priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
-    "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
-    "shruti", "suhani", "kavitha", "rupali", "female"
-}
-
-
-def format_lead_intelligence(metadata: Dict[str, Any]) -> str:
-    """
-    Converts the structured Hermes JSON output into a human-readable
-    prompt block that the LLM can use naturally in conversation.
-    
-    Returns a formatted string or a fallback message.
-    """
-    if not metadata:
-        return "No specific lead data available. Use a general but engaging pitch."
-    
-    parts = []
-    
-    company_name = metadata.get("company_name", "")
-    if company_name:
-        parts.append(f"- Company: {company_name}")
-    
-    summary = metadata.get("summary") or metadata.get("description", "")
-    if summary:
-        parts.append(f"- Summary: {summary}")
-    
-    recent_activity = metadata.get("recent_activity", "")
-    if recent_activity:
-        parts.append(f"- Recent Activity: {recent_activity}")
-    
-    pain_points = metadata.get("pain_points", [])
-    if pain_points:
-        if isinstance(pain_points, list):
-            points_str = ", ".join(pain_points)
-        else:
-            points_str = str(pain_points)
-        parts.append(f"- Pain Points: {points_str}")
-    
-    icebreaker = metadata.get("icebreaker", "")
-    pitch_angle = metadata.get("pitch_angle", "")
-    
-    result = ""
-    if parts:
-        result += "Lead Insights:\n" + "\n".join(parts)
-    
-    if icebreaker:
-        result += f"\n\nSuggested Icebreaker:\n{icebreaker}"
-    
-    if pitch_angle:
-        result += f"\n\nRecommended Pitch Angle:\n{pitch_angle}"
-    
-    if not result.strip():
-        return "No specific lead data available. Use a general but engaging pitch."
-    
-    # Truncate to safe token limit
-    if len(result) > MAX_LEAD_CONTEXT_CHARS:
-        result = result[:MAX_LEAD_CONTEXT_CHARS].rsplit("\n", 1)[0] + "\n..."
-    
-    return result
 
 def fallback_response(language: str) -> str:
     """Returns a safe fallback response in the requested language."""
@@ -121,7 +49,6 @@ def detect_language_mismatch(text: str, expected_lang: str) -> bool:
 
 def build_call_prompt(
     campaign_script: str,
-    lead_metadata: Optional[Dict[str, Any]],
     language: str,
     voice: str,
     company_name: str,
@@ -136,19 +63,13 @@ def build_call_prompt(
     Builds the complete system prompt for a live call turn.
     
     This is the ONLY place where the system prompt is constructed.
-    It merges the campaign goal with Hermes lead intelligence and
+    It merges the campaign goal with lead intelligence and
     conversation state into one coherent instruction set.
     """
     agent_name = "Vani" if voice in FEMALE_VOICES else "Arjun"
     lang_name = LANGUAGE_NAMES.get(language, "Hindi")
     
-    # Format lead intelligence
-    lead_context = format_lead_intelligence(lead_metadata)
-    hermes_used = lead_context != "No specific lead data available. Use a general but engaging pitch."
-    
-    logger.info(f"HERMES_DATA_INJECTED: {hermes_used}")
-    logger.info(f"HERMES_CONTEXT_LENGTH: {len(lead_context)} chars")
-    
+
     # First turn introduction instruction
     first_turn_instruction = ""
     if turn_count == 1:
@@ -166,8 +87,6 @@ The user speaks {lang_name} ({language}).
 ## Campaign Context
 {campaign_script}
 
-## Lead Intelligence (IMPORTANT — use this to personalize the conversation)
-{lead_context}
 
 ## CRITICAL CONVERSATION RULES
 - Always respond in a natural, human-like tone

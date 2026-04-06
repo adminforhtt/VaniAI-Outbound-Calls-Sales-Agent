@@ -440,7 +440,6 @@ class ConversationManager:
         self.campaign_name = "AI Assistant"  # Agent Title from campaign.name
         self.lead_name = "Customer"
         self.lead_phone = "Unknown"
-        self.lead_metadata = {}  # Hermes enrichment data
         self.has_greeted = False
         self._full_transcript = []  # Maintain full history for recent calls
         
@@ -496,7 +495,7 @@ class ConversationManager:
         return b''
 
     async def _initialize_campaign_context(self):
-        """Fetch campaign details AND Hermes lead intelligence once at call start."""
+        """Fetch campaign details once at call start."""
         try:
             with SessionLocal() as db:
                 call_log = db.query(CallLog).filter(CallLog.call_sid == self.call_sid).first()
@@ -505,22 +504,11 @@ class ConversationManager:
                     if lead:
                         self.lead_name = lead.name
                         self.lead_phone = lead.phone
-                        self.language = lead.language or "hi-IN"  # Default to lead's specific lang
-                        
-                        # ── HERMES INTEGRATION: Load lead intelligence ──
-                        if lead.metadata_json:
-                            self.lead_metadata = lead.metadata_json
-                            logger.info(f"HERMES_LOADED: Lead {lead.id} has {len(json.dumps(self.lead_metadata))} bytes of intelligence")
-                        else:
-                            self.lead_metadata = {}
-                            logger.info(f"HERMES_EMPTY: Lead {lead.id} has no enrichment data")
+                        self.language = lead.language or "hi-IN"
                     else:
                         self.lead_name = "Customer"
                         self.lead_phone = "Unknown"
                         self.language = "hi-IN"
-                        self.lead_metadata = {}
-                        logger.info(f"HERMES_EMPTY: Lead {call_log.lead_id} not found")
-                    
                     if lead and lead.campaign_id:
                         campaign = db.query(Campaign).filter(Campaign.id == lead.campaign_id).first()
                         if campaign:
@@ -895,7 +883,6 @@ class ConversationManager:
             else:
                 system_prompt_template = build_call_prompt(
                     campaign_script=self.campaign_prompt,
-                    lead_metadata=self.lead_metadata,
                     language=self.language,
                     voice=self.voice,
                     company_name=self.company_name,

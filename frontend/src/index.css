@@ -1211,7 +1211,7 @@ input, textarea, select {
 }
 
 /* Fix for existing components inside .content */
-.dashboard, .hermes-console, .billing-page {
+.dashboard, .billing-page {
   flex: 1;
   display: flex;
   flex-direction: column;

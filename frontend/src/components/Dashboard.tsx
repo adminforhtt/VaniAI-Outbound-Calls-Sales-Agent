@@ -20,7 +20,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [reportModal, setReportModal] = useState<any>(null);
-  const [researchData, setResearchData] = useState<any>(null);
   const [showAllCalls, setShowAllCalls] = useState(false);
 
 
@@ -183,8 +182,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         const data = await res.json();
         data.callSid = callSid;
         setReportModal(data);
-        // NEW: Auto-load research when opening report
-        fetchResearch(leadId);
       } else {
         showToast('Report generating... Wait for the call to finish.', 'warning');
       }
@@ -245,34 +242,14 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        showToast('Campaign Launch Successful! Hermes is now dialing all pending leads.', 'success');
+        showToast('Campaign Launch Successful! Dialing all pending leads.', 'success');
         fetchLeads();
       }
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
-  const fetchResearch = async (leadId: number) => {
-    try {
-      const res = await fetch(`${API}/hermes/lead/${leadId}/research`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setResearchData(await res.json());
-    } catch (e) { console.error(e); }
-  };
 
-  const triggerResearch = async (leadId: number) => {
-    try {
-      const res = await fetch(`${API}/hermes/lead/${leadId}/research/trigger`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        showToast('Hermes Agent has been dispatched to research this lead!', 'success');
-        fetchLeads();
-      }
-    } catch (e) { console.error(e); }
-  };
   // Computed stats
   const totalCalls = leads.length;
   const completedCalls = leads.filter((l) => l.status === 'completed').length;
@@ -707,14 +684,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                     </div>
                     
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <button 
-                        className="icon-btn-sm"
-                        onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
-                        style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid #E2E8F0', color: '#6366F1', transition: 'all 0.2s' }}
-                        title="Hermes Research"
-                      >
-                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                      </button>
+
                       <button
                         className="icon-btn-sm"
                         style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid #E2E8F0', color: '#475569', transition: 'all 0.2s' }}
@@ -760,7 +730,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                   </svg>
                   Export Transcript
                 </button>
-                <button className="icon-btn" onClick={() => { setReportModal(null); setResearchData(null); }}>
+                <button className="icon-btn" onClick={() => setReportModal(null)}>
                   <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -768,38 +738,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               </div>
             </div>
             <div className="modal-body hide-scrollbar">
-              {/* Add Research Preview Shortcut if available */}
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-                <button 
-                  onClick={() => fetchResearch(reportModal.lead_id)}
-                  style={{ 
-                    padding: '8px 16px', 
-                    borderRadius: '8px', 
-                    background: researchData ? '#EEF2FF' : '#F3F4F6', 
-                    border: researchData ? '1px solid #C7D2FE' : '1px solid #E5E7EB',
-                    color: researchData ? '#4F46E5' : '#4B5563',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  {researchData ? '⚡ Hermes Research Active' : '🔍 Load Hermes Research'}
-                </button>
-              </div>
-
-              {researchData && (
-                <div style={{ background: '#F8FAFC', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)', marginBottom: 'var(--space-xl)', border: '1px solid #E2E8F0' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                      <span style={{ fontSize: '16px' }}>✨</span>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tailored Icebreaker</span>
-                   </div>
-                   <p style={{ fontSize: '15px', color: '#334155', fontWeight: 500, fontStyle: 'italic', marginBottom: '16px', borderLeft: '3px solid #6366F1', paddingLeft: '12px' }}>
-                     "{researchData.icebreaker}"
-                   </p>
-                   <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '4px' }}>HERMES SUMMARY:</div>
-                   <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>{researchData.research_summary}</p>
-                </div>
-              )}
               <div className="modal-stats-row">
                 <div className="modal-stat-box">
                   <div className="stat-label">Duration</div>
@@ -811,20 +749,9 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                     <div className="stat-value">{reportModal.outcome}</div>
                   </div>
                 )}
-                {reportModal.score && (
-                  <div className="modal-stat-box" style={{ background: '#EEF2FF', gridColumn: 'span 2' }}>
-                    <div className="stat-label" style={{ color: '#4F46E5' }}>Hermes Win Probability</div>
-                    <div className="stat-value" style={{ color: '#4338CA' }}>{reportModal.score.score}/100</div>
-                  </div>
-                )}
               </div>
 
-              {reportModal.score && (
-                <div style={{ background: '#FFFBF0', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)', marginBottom: 'var(--space-xl)', border: '1px solid #FEF3C7' }}>
-                  <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--accent-orange)', textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: '8px' }}>AI Reasoning</div>
-                  <p style={{ fontSize: 'var(--font-size-sm)', color: '#92400E', lineHeight: 1.6 }}>{reportModal.score.reasoning}</p>
-                </div>
-              )}
+
 
 
               <div className="transcript-section">

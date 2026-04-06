@@ -20,11 +20,6 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     
-    # SaaS Intelligence (Hermes + Browserbase)
-    BROWSERBASE_API_KEY: str = ""
-    BROWSERBASE_PROJECT_ID: str = ""
-    HERMES_MODEL: str = "qwen/qwen-2.5-72b-instruct:free"
-
     # Billing (Razorpay)
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""

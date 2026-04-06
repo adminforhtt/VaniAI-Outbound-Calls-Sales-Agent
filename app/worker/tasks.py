@@ -5,7 +5,6 @@ from celery import Task
 from kombu.exceptions import OperationalError
 
 from app.worker.celery_app import celery_app
-from app.services.hermes_service import LeadEnrichmentService
 
 logger = logging.getLogger(__name__)
 
@@ -37,50 +36,6 @@ class BaseVaniTask(Task):
         )
 
 
-@celery_app.task(
-    base=BaseVaniTask,
-    bind=True,
-    name="enrich_lead_task",  # Standard name used by API
-    queue="enrichment",
-    autoretry_for=(OperationalError, ConnectionError, TimeoutError),
-    retry_kwargs={"max_retries": 5, "countdown": 5},
-    time_limit=300,
-    soft_time_limit=240,
-)
-def enrich_lead_task(self, lead_id: int) -> str:
-    """
-    Enrich a lead via Hermes agent.
-    """
-    logger.info(f"[enrich_lead] Starting enrichment. lead_id={lead_id}")
-    try:
-        from app.models.core import Lead
-        try:
-            from app.db.session import get_db
-            session = next(get_db())
-        except ImportError:
-            from app.models.core import SessionLocal
-            session = SessionLocal()
-            
-        lead = session.query(Lead).filter(Lead.id == lead_id).first()
-        if not lead:
-            return "Lead not found"
-            
-        tenant_id = getattr(lead, "tenant_id", 1)
-        name = lead.name or "Unknown"
-        company = lead.company or name
-        session.close()
-
-        service = LeadEnrichmentService(tenant_id=tenant_id)
-        success = service.research_lead(lead_id=lead_id, lead_name=name, company=company)
-        return "Success" if success else "Failed"
-
-    except (OperationalError, ConnectionError, TimeoutError):
-        raise
-    except Exception as e:
-        logger.exception(f"[enrich_lead] Error for lead {lead_id}: {e}")
-        return "Failed"
-
-
 @celery_app.task(name="score_lead_task")
 def score_lead_task(call_sid: str, transcript: str):
     from app.agents.qualification import QualificationAgent
@@ -109,34 +64,6 @@ def score_lead_task(call_sid: str, transcript: str):
     finally:
         db.close()
     return score_data
-
-
-@celery_app.task(name="evolve_scripts_task")
-def evolve_scripts_task(campaign_id: int):
-    from app.config.database import SessionLocal
-    from app.models.core import Campaign, CallLog, Lead
-    db = SessionLocal()
-    try:
-        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
-        if not campaign: return "Campaign not found"
-        logs = db.query(CallLog).filter(
-            CallLog.lead_id.in_(db.query(Lead.id).filter(Lead.campaign_id == campaign_id)),
-            CallLog.status == "completed",
-            CallLog.transcript != None
-        ).order_by(CallLog.created_at.desc()).limit(10).all()
-        transcripts = [log.transcript for log in logs if log.transcript]
-        if not transcripts: return "No transcripts available"
-        ts_summary = "\n---\n".join(transcripts)
-    finally:
-        db.close()
-    try:
-        from app.services.hermes_service import LeadEnrichmentService
-        service = LeadEnrichmentService(tenant_id=campaign.tenant_id if hasattr(campaign, "tenant_id") else 1)
-        success = service.evolve_campaign(campaign_id=campaign_id, transcripts_summary=ts_summary)
-        return "Success" if success else "Failed"
-    except Exception as e:
-        logger.error(f"evolve_scripts_task: {e}")
-        return "Failed"
 
 
 @celery_app.task(name="run_campaign_task")

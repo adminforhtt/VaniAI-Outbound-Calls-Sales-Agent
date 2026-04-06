@@ -17,48 +17,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-HERMES_WAIT_TIMEOUT = 1  # Instant dial for test calls/gate
-
-def classify_interest(transcript: str) -> str:
-    """Simple heuristic to figure out lead interest based on full transcript."""
-    transcript_lower = transcript.lower()
-    if "yes " in transcript_lower or "interested" in transcript_lower or "ho" in transcript_lower or "हाँ" in transcript_lower:
-        return "high"
-    elif "not interested" in transcript_lower or "no " in transcript_lower or "nahi" in transcript_lower or "नहीं" in transcript_lower:
-        return "low"
-    else:
-        return "medium"
-
-def suggest_next_step(interest: str) -> str:
-    if interest == "high":
-        return "follow_up"
-    elif interest == "medium":
-        return "nurture"
-    else:
-        return "drop"
-
-def wait_for_hermes(lead_id: int, db: Session, timeout: int = HERMES_WAIT_TIMEOUT) -> bool:
-    """
-    Polls the database for up to `timeout` seconds waiting for enrichment to finish.
-    Returns immediately (True = proceed) if enrichment is 'enriched' or 'failed'.
-    Call always proceeds — we never block longer than timeout.
-    """
-    start = time.time()
-    while time.time() - start < timeout:
-        lead = db.query(Lead).filter(Lead.id == lead_id).first()
-        if not lead:
-            return False
-        db.refresh(lead)
-        if lead.enrichment_status == "enriched":
-            logger.info(f"HERMES_GATE: Lead {lead_id} enriched in {time.time() - start:.1f}s — proceeding")
-            return True
-        if lead.enrichment_status == "failed":
-            logger.warning(f"HERMES_GATE: Lead {lead_id} enrichment failed — proceeding with generic script")
-            return False
-        time.sleep(0.5)
-    logger.warning(f"HERMES_GATE: Lead {lead_id} timed out after {timeout}s — proceeding with generic script")
-    return False
-
 def check_subscription_limit(db: Session, tenant_id: int):
     """Checks if a tenant has remaining calls for the month."""
     sub = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).first()
@@ -85,15 +43,6 @@ def initiate_call(lead_id: int, db: Session = Depends(get_db), tenant_id: int = 
     allowed, sub = check_subscription_limit(db, lead.tenant_id)
     if not allowed:
         raise HTTPException(status_code=402, detail=f"Monthly call limit reached ({sub.monthly_call_limit}). Please upgrade.")
-
-    # 2. Trigger Enrichment if not already done (non-blocking — call always proceeds)
-    if lead.enrichment_status == "pending":
-        try:
-            from app.worker.tasks import enrich_lead_task
-            enrich_lead_task.delay(lead.id)
-            wait_for_hermes(lead.id, db)
-        except Exception as e:
-            logger.warning(f"Enrichment skipped (Celery/Redis unavailable): {e}")
 
     base_url = settings.BASE_URL.rstrip('/')
     try:
@@ -150,17 +99,7 @@ def initiate_test_call(request: TestCallRequest, background_tasks: BackgroundTas
     lead = Lead(name="Test User", phone=request.phone_number, tenant_id=tenant_id, campaign_id=campaign.id, status="pending")
     db.add(lead)
     db.commit()
-    
-    # Trigger enrichment asynchronously via FastAPI background task 
-    # to completely eliminate the risk of Celery/Redis blocking the main API thread
-    def _trigger_enrichment(lead_id):
-        try:
-            from app.worker.tasks import enrich_lead_task
-            enrich_lead_task.delay(lead_id)
-        except Exception as e:
-            logger.warning(f"Background enrichment failed: {e}")
-            
-    background_tasks.add_task(_trigger_enrichment, lead.id)
+
 
     base_url = settings.BASE_URL.rstrip('/')
     try:
@@ -288,20 +227,7 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
             }
             logger.info(f"CALL_OUTCOME: {call_outcome}")
             
-            # FUTURE-PROOFING: Store transcript in lead metadata for Hermes learning loop
-            if call_log.lead_id:
-                lead = db.query(Lead).filter(Lead.id == call_log.lead_id).first()
-                if lead:
-                    meta = lead.metadata_json or {}
-                    meta["last_transcript"] = transcript[:2000]  # Cap at 2000 chars
-                    meta["last_call_status"] = status
-                    meta["last_call_duration"] = int(duration)
-                    meta["lead_interest"] = interest
-                    meta["next_action"] = next_action
-                    lead.metadata_json = meta
-                    db.commit()
-                    logger.info(f"FUTURE_HOOK: Stored transcript for lead {lead.id} ({len(transcript)} chars)")
-            
+
             # Queue background task for qualification (non-fatal if Celery is down)
             try:
                 from app.worker.tasks import score_lead_task

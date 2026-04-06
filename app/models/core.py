@@ -49,8 +49,7 @@ class Lead(Base):
     metadata_json = Column(JSON, default={})
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=True)
     status = Column(String, default="pending")
-    enrichment_status = Column(String, default="pending")  # pending | enriched | failed
-    enriched_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

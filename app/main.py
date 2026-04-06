@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.config.database import Base, engine
-from app.api.endpoints import leads, campaigns, calls, reporting, auth, analytics, billing, hermes
+from app.api.endpoints import leads, campaigns, calls, reporting, auth, analytics, billing
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +30,6 @@ app.include_router(calls.router, prefix="/api/calls", tags=["Calls"])
 app.include_router(reporting.router, prefix="/api/reporting", tags=["Reporting"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
-app.include_router(hermes.router, prefix="/api/hermes", tags=["Hermes"])
 
 @app.on_event("startup")
 async def startup_event():
