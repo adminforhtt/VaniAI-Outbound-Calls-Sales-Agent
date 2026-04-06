@@ -1,4 +1,5 @@
-campaign context.
+"""
+Prompt Builder: Constructs the final system prompt for live calls by merging campaign context.
 
 This module is the single source of truth for how the AI agent's personality,
 instructions, and contextual knowledge are assembled before every turn.
