@@ -24,7 +24,7 @@ def get_supabase() -> Client:
         _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
     return _supabase_client
 
-def get_current_user_optional(request: Request, db: Session = Depends(get_db)):
+def get_current_user(request: Request, db: Session = Depends(get_db)):
     """
     Checks for auth bypass OR a valid token. If bypass is on, returns a dummy user.
     """
@@ -74,7 +74,7 @@ def get_current_user_optional(request: Request, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def get_auth_tenant(current_user: dict = Depends(get_current_user_optional)) -> int:
+def get_auth_tenant(current_user: dict = Depends(get_current_user)) -> int:
     tenant_id = current_user.get("tenant_id")
     if not tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized or no tenant mapped. Try logging out and in again.")
