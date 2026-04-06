@@ -695,6 +695,13 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                           {lead.outcome && (
                             <span style={{ fontSize: '10px', color: '#059669', fontWeight: 600 }}>✓ {lead.outcome}</span>
                           )}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#6366F1' }}
+                            title="Ask Hermes to research"
+                          >
+                            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                          </button>
                         </div>
                       </div>
                     </div>
