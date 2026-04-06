@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import httpx
-import base64
 import os
 from app.config.settings import settings
 
@@ -15,8 +14,8 @@ async def main():
         "Content-Type": "application/json"
     }
     payload = {
-        "inputs": ["Hello, validation test."],
-        "target_language_code": "en-IN",
+        "inputs": ["तुमचं स्वागत आहे, मी कर्ज विभागातून बोलत आहे"],
+        "target_language_code": "mr-IN",
         "speaker": "priya",
         "pace": 1.0,
         "speech_sample_rate": 8000,
@@ -24,11 +23,10 @@ async def main():
     }
     
     async with httpx.AsyncClient() as client:
-        print(f"Calling Sarvam with Key: {key[:5]}...")
         r = await client.post(url, headers=headers, json=payload, timeout=10)
         print(f"Status: {r.status_code}")
         if r.status_code == 200:
-            print("SUCCESS! Key is working and has credits.")
+            print("SUCCESS! Marathi is working.")
         else:
             print(f"FAILED! Error: {r.text}")
 

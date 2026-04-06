@@ -122,11 +122,6 @@ class TTSService:
             if framerate != 8000:
                 pcm_data, _ = audioop.ratecv(pcm_data, sampwidth, 1, framerate, 8000, None)
 
-            # 5. AUDIO POST-PROCESSING PIPELINE
-            pcm_data = normalize_audio(pcm_data, sampwidth)
-            pcm_data = apply_telephony_filter(pcm_data, sampwidth)
-            pcm_data = add_fade_edges(pcm_data, sampwidth, fade_ms=30)
-
             # Encode to mu-law G.711u
             ulaw_data = audioop.lin2ulaw(pcm_data, sampwidth)
             return ulaw_data
