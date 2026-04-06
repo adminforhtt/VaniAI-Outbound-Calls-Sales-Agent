@@ -11,8 +11,19 @@ import re
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
+# Map BCP-47 codes to human-readable language names
+LANGUAGE_NAMES = {
+    "hi-IN": "Hindi", "en-IN": "English", "bn-IN": "Bengali",
+    "ta-IN": "Tamil", "te-IN": "Telugu", "mr-IN": "Marathi",
+    "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
+    "pa-IN": "Punjabi", "or-IN": "Odia",
+}
 
-
+FEMALE_VOICES = {
+    "priya", "anushka", "manisha", "vidya", "arya", "ritu", "neha",
+    "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya",
+    "shruti", "suhani", "kavitha", "rupali", "female"
+}
 
 def fallback_response(language: str) -> str:
     """Returns a safe fallback response in the requested language."""
