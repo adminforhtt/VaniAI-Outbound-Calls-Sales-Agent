@@ -428,6 +428,7 @@ class ConversationManager:
         self._pending_partial: str = None  # track partial STT for early LLM
         self._stt_buffer = []              # merges split sentences across breathing pauses
         self._stt_debounce_task = None     # handles sentence completion timing
+        self._audio_buffer = bytearray()   # Buffer for perfect 20ms chunks
 
 
         # Cached campaign config
@@ -801,12 +802,23 @@ class ConversationManager:
         logger.info("AUDIO_SENT")
         
     async def _stream_audio_to_twilio(self, audio_bytes: bytes):
-        """Stream mu-law audio bytes to Twilio in 320-byte chunks (40ms) for enhanced jitter stability."""
-        chunk_size = 320
-        for i in range(0, len(audio_bytes), chunk_size):
+        """
+        Buffer and stream mu-law audio bytes to Twilio with strict 20ms pacing.
+        Twilio expects exactly 160 bytes of mu-law per 'media' event.
+        """
+        if not audio_bytes:
+            return
+
+        self._audio_buffer.extend(audio_bytes)
+        chunk_size = 160  # 20ms at 8000Hz mu-law
+        
+        while len(self._audio_buffer) >= chunk_size:
             if asyncio.current_task().cancelled():
                 raise asyncio.CancelledError()
-            chunk = audio_bytes[i:i + chunk_size]
+                
+            chunk = self._audio_buffer[:chunk_size]
+            del self._audio_buffer[:chunk_size]
+            
             payload = base64.b64encode(chunk).decode("utf-8")
             msg = {
                 "event": "media",
@@ -814,7 +826,16 @@ class ConversationManager:
                 "media": {"payload": payload}
             }
             await self.websocket.send_text(json.dumps(msg))
-            await asyncio.sleep(0.038)  # 38ms pacing for 40ms audio chunks
+            # Strict 20ms pacing (accounting for loop overhead)
+            await asyncio.sleep(0.0195) 
+
+    async def flush_audio_buffer(self):
+        """Sends remaining bytes with padding to complete the last 20ms frame."""
+        if self._audio_buffer:
+            padding_needed = 160 - len(self._audio_buffer)
+            if padding_needed > 0:
+                self._audio_buffer.extend(b'\xff' * padding_needed)
+            await self._stream_audio_to_twilio(b"")
 
 
     async def _generate_and_speak(self, user_text: str):
@@ -911,6 +932,9 @@ class ConversationManager:
             
             # Persist full transcript to DB if call is nearing end or periodically
             asyncio.create_task(self._sync_transcript_to_db())
+            
+            # Final buffer flush
+            await self.flush_audio_buffer()
 
         except asyncio.CancelledError:
             logger.info("Agent task cancelled.")
