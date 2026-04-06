@@ -182,6 +182,8 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
         const data = await res.json();
         data.callSid = callSid;
         setReportModal(data);
+        // NEW: Auto-load research when opening report
+        fetchResearch(leadId);
       } else {
         showToast('Report generating... Wait for the call to finish.', 'warning');
       }
@@ -666,52 +668,61 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
             </div>
             <div className="calls-list">
               {leads.slice(0, 8).map((lead) => (
-                <div className="call-item" key={lead.id}>
-                  <div className="call-item-left">
-                    <span className="call-date" style={{ fontWeight: 700, color: '#1E293B' }}>{formatDistanceToNow(lead.created_at)}</span>
-                    <span className="call-date">{new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <div className="call-item" key={lead.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: '12px', padding: '16px 0' }}>
+                  {/* Column 1: Identity & Time */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                    <span className="call-name" style={{ fontSize: '14px', fontWeight: 600, color: '#1E293B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {lead.name === 'Test User' ? 'Quick Test' : lead.name}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>{formatDistanceToNow(lead.created_at)}</span>
+                      <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: '#CBD5E1' }}></span>
+                      <span style={{ fontSize: '10px', color: '#94A3B8' }}>{lead.phone}</span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
-                    <div className="call-item-right" style={{ marginLeft: '12px' }}>
-                      <span className="call-name">{lead.name === 'Test User' ? 'Quick Test' : lead.name}</span>
-                      <span className="call-date" style={{ fontSize: '10px' }}>{lead.phone}</span>
+
+                  {/* Column 2: Status & Lang */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <div className="call-status" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span className={`status-dot ${lead.status || 'pending'} ${lead.status === 'initiated' ? 'pulse' : ''}`}></span>
+                      {lead.status === 'initiated' ? 'Live' : (lead.status || 'Done')}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {lead.language && (
+                        <span style={{ fontSize: '9px', fontWeight: 800, color: '#475569', background: '#F1F5F9', padding: '1px 5px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
+                          {lead.language.split('-')[0].toUpperCase()}
+                        </span>
+                      )}
+                      {lead.outcome && (
+                        <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>✓ {lead.outcome}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Column 3: Stats & Actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ textAlign: 'right', paddingRight: '8px', borderRight: '1px solid #F1F5F9' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#1E293B' }}>{lead.duration || 0}s</div>
                     </div>
                     
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                       <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>{lead.duration || 0}s</div>
-                          <div style={{ fontSize: '9px', color: '#94A3B8', textTransform: 'uppercase' }}>Duration</div>
-                       </div>
-                       
-                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: '80px' }}>
-                        <span className="call-status">
-                          <span className={`status-dot ${lead.status || 'pending'} ${lead.status === 'initiated' ? 'pulse' : ''}`}></span>
-                          {lead.status === 'initiated' ? 'in progress' : (lead.status || 'pending')}
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                          {lead.language && (
-                            <span style={{ fontSize: '10px', color: '#64748B', background: '#F1F5F9', padding: '2px 6px', borderRadius: '4px' }}>{lead.language.split('-')[0].toUpperCase()}</span>
-                          )}
-                          {lead.outcome && (
-                            <span style={{ fontSize: '10px', color: '#059669', fontWeight: 600 }}>✓ {lead.outcome}</span>
-                          )}
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
-                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#6366F1' }}
-                            title="Ask Hermes to research"
-                          >
-                            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                          </button>
-                        </div>
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button 
+                        className="icon-btn-sm"
+                        onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
+                        style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid #E2E8F0', color: '#6366F1', transition: 'all 0.2s' }}
+                        title="Hermes Research"
+                      >
+                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                      </button>
+                      <button
+                        className="icon-btn-sm"
+                        style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid #E2E8F0', color: '#475569', transition: 'all 0.2s' }}
+                        title="View Report"
+                        onClick={() => viewReport(lead.id, lead.call_sid || '')}
+                      >
+                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+                      </button>
                     </div>
-                    <button
-                      className="call-action-btn"
-                      title="View insight"
-                      onClick={() => viewReport(lead.id, lead.call_sid || '')}
-                    >
-                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 17l9.2-9.2M17 17V7H7"/></svg>
-                    </button>
                   </div>
                 </div>
               ))}
@@ -820,12 +831,27 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
                 <div className="transcript-bubbles">
                   {reportModal.transcript
                     ? reportModal.transcript.split('\n').map((line: string, i: number) => {
-                        const isUser = line.toLowerCase().startsWith('user:');
-                        const text = line.substring(line.indexOf(':') + 1).trim();
-                        if (!text) return null;
+                        const match = line.match(/^(User|Assistant):\s*(.*)/i);
+                        if (!match) {
+                          // Fallback for lines without speaker prefix
+                          return line.trim() ? (
+                            <div className="bubble agent" key={i} style={{ fontStyle: 'italic', opacity: 0.8 }}>
+                              {line.trim()}
+                            </div>
+                          ) : null;
+                        }
+                        const speaker = match[1].toLowerCase();
+                        const text = match[2].trim();
+                        const isUser = speaker === 'user';
+                        
                         return (
-                          <div className={`bubble ${isUser ? 'user' : 'agent'}`} key={i}>
-                            {text}
+                          <div key={i} style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 700, color: '#94A3B8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              {isUser ? 'You' : 'Agent'} • Turn #{Math.floor(i/2) + 1}
+                            </div>
+                            <div className={`bubble ${isUser ? 'user' : 'agent'}`}>
+                              {text}
+                            </div>
                           </div>
                         );
                       })
