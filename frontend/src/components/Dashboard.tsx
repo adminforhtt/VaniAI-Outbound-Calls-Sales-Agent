@@ -9,7 +9,10 @@ interface Lead {
   phone: string;
   status: string;
   call_sid?: string;
-  created_at?: string;
+  created_at: string;
+  duration?: number;
+  language?: string;
+  outcome?: string;
 }
 
 function Dashboard({ token, onLogout }: { token: string; onLogout: () => void }) {
@@ -157,6 +160,17 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const formatDistanceToNow = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    return date.toLocaleDateString();
   };
 
   const viewReport = async (leadId: number, callSid: string) => {
@@ -654,34 +668,34 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               {leads.slice(0, 8).map((lead) => (
                 <div className="call-item" key={lead.id}>
                   <div className="call-item-left">
-                    <span className="call-date">{lead.created_at ? new Date(lead.created_at).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</span>
-                    <span className="call-date">{lead.phone}</span>
+                    <span className="call-date" style={{ fontWeight: 700, color: '#1E293B' }}>{formatDistanceToNow(lead.created_at)}</span>
+                    <span className="call-date">{new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div className="call-item-right">
+                  <div style={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
+                    <div className="call-item-right" style={{ marginLeft: '12px' }}>
                       <span className="call-name">{lead.name === 'Test User' ? 'Quick Test' : lead.name}</span>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <span className="call-date" style={{ fontSize: '10px' }}>{lead.phone}</span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                       <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>{lead.duration || 0}s</div>
+                          <div style={{ fontSize: '9px', color: '#94A3B8', textTransform: 'uppercase' }}>Duration</div>
+                       </div>
+                       
+                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: '80px' }}>
                         <span className="call-status">
                           <span className={`status-dot ${lead.status || 'pending'} ${lead.status === 'initiated' ? 'pulse' : ''}`}></span>
                           {lead.status === 'initiated' ? 'in progress' : (lead.status || 'pending')}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                          {(lead as any).enrichment_status === 'enriched' && (
-                            <span style={{ fontSize: '10px', color: '#4F46E5', fontWeight: 600 }}>✨ Enriched</span>
+                          {lead.language && (
+                            <span style={{ fontSize: '10px', color: '#64748B', background: '#F1F5F9', padding: '2px 6px', borderRadius: '4px' }}>{lead.language.split('-')[0].toUpperCase()}</span>
                           )}
-                          {(lead as any).enrichment_status === 'pending' && (
-                            <span style={{ fontSize: '10px', color: '#9CA3AF' }}>Hermes: Prep...</span>
+                          {lead.outcome && (
+                            <span style={{ fontSize: '10px', color: '#059669', fontWeight: 600 }}>✓ {lead.outcome}</span>
                           )}
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); triggerResearch(lead.id); }}
-                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#6366F1' }}
-                            title="Ask Hermes to research"
-                          >
-                            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                          </button>
                         </div>
-                      </div>
                       </div>
                     </div>
                     <button
