@@ -15,16 +15,9 @@ from app.config.database import SessionLocal
 from app.models.core import CallLog, Lead, Campaign
 from app.services.policy_engine import PolicyEngine
 from app.services.latency_controller import LatencyController
-from app.services.prompt_builder import (
-    build_call_prompt, 
-    LANGUAGE_NAMES, 
-    FEMALE_VOICES, 
-    detect_language_mismatch, 
-    fallback_response
-)
-
 import re
 import os
+from typing import Optional, List, Dict, Any
 from app.services.exceptions import (
     STTBufferException, CampaignLoadException,
     TTSGenerationException, LLMInferenceException, TwilioStreamException
@@ -36,19 +29,7 @@ FILLER_WORDS = {
 }
 
 # Map BCP-47 codes to human-readable language names for the LLM
-LANGUAGE_NAMES = {
-    "hi-IN": "Hindi",
-    "en-IN": "English",
-    "bn-IN": "Bengali",
-    "ta-IN": "Tamil",
-    "te-IN": "Telugu",
-    "mr-IN": "Marathi",
-    "gu-IN": "Gujarati",
-    "kn-IN": "Kannada",
-    "ml-IN": "Malayalam",
-    "pa-IN": "Punjabi",
-    "or-IN": "Odia",
-}
+from app.services.prompt_builder import LANGUAGE_NAMES, FEMALE_VOICES, detect_language_mismatch, fallback_response, build_call_prompt
 
 import re
 
@@ -460,6 +441,7 @@ class ConversationManager:
         self.lead_phone = "Unknown"
         self.lead_metadata = {}  # Hermes enrichment data
         self.has_greeted = False
+        self._full_transcript = []  # Maintain full history for recent calls
         
         self.state = 'GREETING'
         self.turn_count = 0
@@ -837,57 +819,40 @@ class ConversationManager:
 
     async def _generate_and_speak(self, user_text: str):
         turn_start = time.time()
-
-        # If already processing, cancel old and take new (latest input wins)
         if self._processing:
             logger.info("NEW_INPUT_OVERRIDE: cancelling previous response")
             self.cancel_ongoing_tts()
-            await asyncio.sleep(0.05)  # let cancellation propagate
+            await asyncio.sleep(0.05)
         
         self._processing = True
         try:
-            # ── OPT 6: PRE-CACHED INSTANT RESPONSE ──
             instant = self._check_instant_response(user_text)
             if instant:
                 logger.info(f"⚡ INSTANT RESPONSE: {instant}")
                 audio = await TTSService.generate_speech(instant, language=self.language, speaker=self.voice)
                 if audio:
-                    e2e_ms = int((time.time() - turn_start) * 1000)
-                    logger.info(f"⏱ E2E_LATENCY_MS={e2e_ms} (instant)")
-                    self.last_agent_speech_time = time.time()
                     await self._stream_audio_to_twilio(audio)
                 self._session_cache["history"].append({"role": "assistant", "content": instant})
-                total_ms = int((time.time() - turn_start) * 1000)
-                logger.info(f"⏱ TURN_TOTAL_MS={total_ms} (instant)")
+                self._full_transcript.append(f"Assistant: {instant}")
                 return
 
-            # ── INTENT MEMORY: extract & store keywords ──
             stage = self.state
             history = self._session_cache.get("history", [])
-            
-            # Extract keywords for context memory
             new_keywords = PolicyEngine.extract_keywords(user_text)
             if new_keywords:
-                self.intent_memory = list(set(self.intent_memory + new_keywords))[-8:]  # keep last 8
-                logger.info(f"INTENT_DETECTED: {new_keywords} | MEMORY: {self.intent_memory}")
+                self.intent_memory = list(set(self.intent_memory + new_keywords))[-8:]
 
             history.append({"role": "user", "content": user_text})
+            self._full_transcript.append(f"User: {user_text}")
             self.turn_count += 1
 
-            # 7. AMBIGUITY HANDLING (context-aware with intent memory)
             is_ambig, ambig_resp = PolicyEngine.check_ambiguity(user_text, self.language, stage, self.intent_memory)
             if is_ambig:
-                if getattr(self, "last_ambig_turn", -1) == self.turn_count - 1:
-                    logger.info("AMBIGUITY LOOP DETECTED: Forcing guided question.")
-                    valid_response = "काय आप पढ़ाई या नौकरी के बारे में पूछ रहे हैं?"
-                else:
-                    valid_response = ambig_resp
-                self.last_ambig_turn = self.turn_count
-                new_stage = stage
-                logger.info(f"Ambiguity detected. Skipping LLM.")
+                valid_response = ambig_resp
                 await self.latency_controller.on_llm_first_token()
+                async for audio_chunk in TTSService.generate_speech_streaming(valid_response, language=self.language, speaker=self.voice):
+                    await self.send_audio_safe(audio_chunk)
             else:
-                # ── HERMES-POWERED SYSTEM PROMPT via prompt_builder ──
                 system_prompt_template = build_call_prompt(
                     campaign_script=self.campaign_prompt,
                     lead_metadata=self.lead_metadata,
@@ -901,124 +866,66 @@ class ConversationManager:
                     intent_memory=self.intent_memory,
                     turn_count=self.turn_count,
                 )
-
                 recent_history = history[-5:]
-                hist_str = ""
-                for msg in recent_history:
-                    role_str = "User" if msg['role'] == "user" else "Agent"
-                    hist_str += f"{role_str}: {msg['content']}\n"
+                hist_str = "\n".join([f"{'User' if m['role']=='user' else 'Agent'}: {m['content']}" for m in recent_history])
                 full_system_prompt = f"{system_prompt_template}\nRecent Context:\n{hist_str}\nUser: {user_text}\n\nAgent:"
                 messages = [{"role": "system", "content": full_system_prompt}]
 
-                valid_response = ""
-                max_attempts = 2
-                fallback_triggered = False
+                # ── STREAMING LLM -> TTS PIPELINE ──
+                complete_response = ""
+                chunk_buffer = ""
+                first_token = True
                 
-                logger.info(f"LANGUAGE_ENFORCED: {self.language}")
-                
-                for attempt in range(max_attempts):
-                    if asyncio.current_task().cancelled():
-                        return
-                        
-                    t0 = time.time()
-                    try:
-                        # Wrap LLM call with a strict timeout
-                        raw_response = await asyncio.wait_for(
-                            LLMService.generate_response(messages, provider=self.llm_provider),
-                            timeout=3.5
-                        )
-                        response_time = time.time() - t0
-                        logger.info(f"LLM_RESPONSE_TIME: {response_time:.2f}s")
-                    except asyncio.TimeoutError:
-                        logger.warning("LLM TimeoutError: generation took too long.")
-                        valid_response = fallback_response(self.language)
-                        fallback_triggered = True
-                        break
-                        
-                    # 9. LOGGING
-                    logger.info(f"FULL_LLM_RESPONSE: {raw_response}")
+                async for llm_chunk in LLMService.generate_response_stream(messages, provider=self.llm_provider):
+                    if asyncio.current_task().cancelled(): return
+                    if first_token:
+                        await self.latency_controller.on_llm_first_token()
+                        first_token = False
                     
-                    # Signal Latency Controller
-                    await self.latency_controller.on_llm_first_token()
+                    complete_response += llm_chunk
+                    chunk_buffer += llm_chunk
                     
-                    is_valid, reason = PolicyEngine.validate_response(raw_response, user_text)
-                    if is_valid:
-                        if detect_language_mismatch(raw_response, self.language):
-                            logger.warning(f"LANGUAGE MISMATCH DETECTED: Expected {self.language}")
-                            valid_response = fallback_response(self.language)
-                            fallback_triggered = True
-                            break
+                    # Split into sentences for parallel TTS
+                    if any(p in chunk_buffer for p in ['.', '!', '?', '।', '॥']):
+                        sentences = _HARD_SENTENCE_BREAKS.split(chunk_buffer)
+                        for s in sentences[:-1]:
+                            s = s.strip()
+                            if s:
+                                async for audio in TTSService.generate_speech_streaming(s, language=self.language, speaker=self.voice):
+                                    await self.send_audio_safe(audio)
+                        chunk_buffer = sentences[-1]
 
-                        valid_response = raw_response
-                        break
-                    else:
-                        logger.warning(f"Response rejected by PolicyEngine: {reason}. Regenerating...")
+                # Final buffer flush
+                if chunk_buffer.strip():
+                    async for audio in TTSService.generate_speech_streaming(chunk_buffer.strip(), language=self.language, speaker=self.voice):
+                        await self.send_audio_safe(audio)
 
-                if not valid_response:
-                    valid_response = fallback_response(self.language)
-                    fallback_triggered = True
-                    
-                logger.info(f"FALLBACK_USED: {fallback_triggered}")
-            
-            # Apply strict limit
-            valid_response = clean_llm_for_tts(valid_response, max_chars=250)
-            
-            if len(valid_response.strip()) == 0:
-                valid_response = "कृपया फिर से बताएं"
-                
-            logger.info(f"RESPONSE_LENGTH: {len(valid_response)}")
-            logger.info(f"FINAL_TTS_INPUT: {valid_response}")
+                valid_response = complete_response if complete_response else fallback_response(self.language)
 
-            # STATE MACHINE CORRECTION
-            new_stage = compute_next_state(
-                current_state=self.state,
-                user_text=user_text,
-                intent_memory=self.intent_memory,
-                turn_count=self.turn_count
-            )
+            # Update State & Cache
+            new_stage = compute_next_state(self.state, user_text, self.intent_memory, self.turn_count)
             self.state = new_stage
-            logger.info(f"STATE_TRANSITION: {stage} -> {new_stage}")
-
-            self.last_agent_speech_time = time.time()
+            self._session_cache["history"] = (history + [{"role": "assistant", "content": valid_response}])[-5:]
+            self._full_transcript.append(f"Assistant: {valid_response}")
+            await redis_client.save_session(self.call_sid, self._session_cache)
             
-            async def state_update_routine():
-                self._session_cache["history"] = history[-5:] + [{"role": "assistant", "content": valid_response}]
-                await redis_client.save_session(self.call_sid, self._session_cache)
-                logger.info("STATE_UPDATE = Completed Async")
-                
-            async def tts_send_routine():
-                first_chunk = True
-                try:
-                    async for audio_chunk in TTSService.generate_speech_streaming(valid_response, language=self.language, speaker=self.voice):
-                        await self.send_audio_safe(audio_chunk)
-                        
-                        if first_chunk:
-                            e2e_ms = int((time.time() - turn_start) * 1000)
-                            logger.info(f"⏱ E2E_LATENCY_MS={e2e_ms} (turn start → first TTS chunk)")
-                            first_chunk = False
-                            
-                        self.last_agent_speech_time = time.time()
-                except Exception as e:
-                    logger.error(f"Streaming TTS FAILED: {e}")
-                    logger.info("FALLBACK_USED")
-                    await self.send_audio_safe(self._get_fallback_audio())
-                    
-            try:
-                # PARALLEL EXECUTION
-                asyncio.create_task(state_update_routine())
-                await tts_send_routine()
-            except asyncio.CancelledError:
-                logger.info("Agent TTS task cancelled (barge-in).")
-                raise
-
-            total_turn_ms = int((time.time() - turn_start) * 1000)
-            logger.info(f"Agent ({self.language}) [{new_stage}]: {valid_response}")
-            logger.info(f"⏱ TURN_TOTAL_MS={total_turn_ms}")
+            # Persist full transcript to DB if call is nearing end or periodically
+            asyncio.create_task(self._sync_transcript_to_db())
 
         except asyncio.CancelledError:
-            logger.info("Agent task cancelled (barge-in).")
+            logger.info("Agent task cancelled.")
         except Exception as e:
             logger.error(f"Error in speaking task: {e}")
         finally:
             self._processing = False
+
+    async def _sync_transcript_to_db(self):
+        try:
+            with SessionLocal() as db:
+                call_log = db.query(CallLog).filter(CallLog.call_sid == self.call_sid).first()
+                if call_log:
+                    call_log.transcript = "\n".join(self._full_transcript)
+                    db.commit()
+        except Exception as e:
+            logger.error(f"Transcript DB sync failed: {e}")
 

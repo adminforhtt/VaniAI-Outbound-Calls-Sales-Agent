@@ -267,10 +267,9 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
         db.commit()
 
         if status == "completed":
-            # fetch full transcript from redis
-            history = await redis_client.get_history(call_sid)
-            transcript = "\n".join([f"{str(msg['role']).capitalize()}: {msg['content']}" for msg in history])
+            # Save FULL transcript from the manager's state
             call_log.transcript = transcript
+            call_log.completed_at = datetime.utcnow()
             db.commit()
             
             # Predict outcome mathematically
@@ -311,6 +310,28 @@ async def status_webhook(request: Request, background_tasks: BackgroundTasks, db
                 logger.warning(f"Lead scoring skipped (Celery/Redis unavailable): {e}")
             
     return {"status": "ok"}
+
+@router.get("/recent")
+async def get_recent_calls(db: Session = Depends(get_db), tenant_id: int = Depends(get_auth_tenant)):
+    """API for the Recent Calls dashboard section."""
+    calls = db.query(CallLog, Lead.name, Lead.language)\
+        .join(Lead, CallLog.lead_id == Lead.id)\
+        .filter(CallLog.tenant_id == tenant_id)\
+        .order_by(CallLog.created_at.desc())\
+        .limit(50).all()
+        
+    return [
+        {
+            "call_sid": c.CallLog.call_sid,
+            "lead_name": c.name,
+            "language": c.language,
+            "status": c.CallLog.status,
+            "duration": c.CallLog.duration,
+            "created_at": c.CallLog.created_at.isoformat(),
+            "has_transcript": bool(c.CallLog.transcript),
+            "outcome": c.CallLog.outcome
+        } for c in calls
+    ]
 
 @router.get("/{call_sid}/transcript/download")
 async def download_transcript(call_sid: str, db: Session = Depends(get_db)):

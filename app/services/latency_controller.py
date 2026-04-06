@@ -51,13 +51,8 @@ class LatencyController:
         asyncio.create_task(self._play_instant_ack())
 
     async def _play_instant_ack(self):
-        """Fires an instant short backchannel if LLM isn't instantly ready."""
-        await asyncio.sleep(0.020) # 20ms delay threshold for instant overlap
-        if not self._filler_played and not self._streaming_started:
-            audio = self.get_cached_audio("acknowledgement")
-            if audio:
-                asyncio.create_task(self.send_audio(audio))
-            self._filler_played = True
+        """No-op: removed to prevent noise overlay."""
+        pass
 
     async def _latency_loop(self, intent: str):
         """Monitors time passed since user ended speech to inject smart masking."""

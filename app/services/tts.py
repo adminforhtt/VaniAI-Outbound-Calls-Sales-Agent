@@ -13,69 +13,7 @@ logger = logging.getLogger(__name__)
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", settings.SARVAM_API_KEY)
 
-def validate_tts_payload(payload: dict):
-    allowed_keys = ["text", "voice", "model", "sample_rate"]
-    for key in payload.keys():
-        if key not in allowed_keys:
-            raise Exception(f"Invalid TTS param: {key}")
-
-async def synthesize_sarvam(text: str, speaker: str = "kavya") -> bytes:
-    """
-    Call Sarvam AI TTS. Returns raw PCM/WAV bytes decoded from base64.
-    """
-    if not text or not text.strip():
-        logger.warning("TTS called with empty text — skipping")
-        return b""
-
-    text = text.strip()
-    if len(text) > 500:
-        text = text[:500]
-
-    payload = {
-        "text": text,
-        "voice": speaker,
-        "model": "bulbul:v3",
-        "sample_rate": 8000
-    }
-
-    validate_tts_payload(payload)
-
-    headers = {
-        "api-subscription-key": SARVAM_API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    logger.info(f"TTS_PAYLOAD: {payload}")
-    logger.info("TTS_MODEL_USED: bulbul:v3")
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                "https://api.sarvam.ai/text-to-speech",
-                json=payload,
-                headers=headers
-            )
-
-            if response.status_code != 200:
-                logger.error(f"TTS_FAILED_REASON: status={response.status_code} body={response.text[:300]}")
-                return b""
-
-            data = response.json()
-            audios = data.get("audios", [])
-            if not audios or not audios[0]:
-                logger.error(f"TTS_SARVAM_EMPTY_RESPONSE: {data}")
-                return b""
-
-            audio_bytes = base64.b64decode(audios[0])
-            logger.info(f"TTS_SUCCESS: {len(audio_bytes)} bytes")
-            return audio_bytes
-
-    except httpx.TimeoutException:
-        logger.error(f"TTS_TIMEOUT: Sarvam did not respond in 10s")
-        return b""
-    except Exception as e:
-        logger.error(f"TTS_FAILED_REASON: Exception: {e}")
-        return b""
+# synthesize_sarvam was deprecated in favor of TTSService.generate_speech.
 
 # Map internal voice names → valid Sarvam bulbul:v3 speaker IDs
 VOICE_MAP = {
@@ -117,16 +55,13 @@ def normalize_audio(pcm_data: bytes, sampwidth: int) -> bytes:
         if rms == 0:
             return pcm_data
         
-        # Target RMS for clear telephony audio
-        target_rms = 4000
+        # Target RMS for clear telephony audio (reduced to prevent clipping)
+        target_rms = 3000
         gain_factor = target_rms / rms
         
         # Clamp gain to prevent distortion
-        gain_factor = min(gain_factor, 3.0)
+        gain_factor = min(gain_factor, 2.0)
         gain_factor = max(gain_factor, 0.5)
-        
-        # Apply +2dB on top (factor ≈ 1.26)
-        gain_factor *= 1.26
         
         # Apply gain via audioop.mul
         pcm_data = audioop.mul(pcm_data, sampwidth, gain_factor)

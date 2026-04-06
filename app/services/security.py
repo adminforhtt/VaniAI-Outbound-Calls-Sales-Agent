@@ -10,8 +10,18 @@ logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
-# Initialize Supabase Admin Client
-supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+# Lazy initialization for Supabase to prevent crash on import
+_supabase_client = None
+
+def get_supabase() -> Client:
+    global _supabase_client
+    if _supabase_client is None:
+        if not settings.SUPABASE_SERVICE_ROLE_KEY:
+            logger.error("SUPABASE_SERVICE_ROLE_KEY is missing! Using dummy bypass if enabled.")
+            if not settings.BYPASS_AUTH:
+                raise Exception("Production Auth requires SUPABASE_SERVICE_ROLE_KEY")
+        _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    return _supabase_client
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """
@@ -31,6 +41,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     try:
         # Validate JWT via Supabase API
+        supabase = get_supabase()
         user_response = supabase.auth.get_user(token)
         if not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid token")
