@@ -9,7 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 
 <p align="center">
-  <em>A high-performance outbound caller featuring ultra-low latency streaming, multi-tenant SaaS architecture, autonomous lead research (Hermes), and production-ready cloud deployment.</em>
+  <em>A high-performance outbound caller featuring ultra-low latency streaming, multi-tenant SaaS architecture, and production-ready cloud deployment.</em>
 </p>
 
 </div>
@@ -19,7 +19,6 @@
 ## 🚀 Key Production Features
 
 - **⚡ Ultra-Low Latency:** Sub-800ms turn-around time using optimized WebSockets, VAD-gated streaming, and Groq/OpenRouter acceleration.
-- **🛰️ Hermes Intelligence Engine:** Pre-call autonomous lead research using **Nous Research Hermes** + Browserbase. Scrapes the live web to generate personalized scripts and icebreakers.
 - **🛡️ Enterprise Multi-Tenancy:** Powered by **Supabase Auth** and PostgreSQL. Strict Row-Level Security (RLS) and tenant isolation for multiple business users.
 - **🗣️ Native Indic Support:** Flawless conversational fluency in 11+ Indic languages (Hindi, Marathi, Bengali, Tamil, etc.) via **Sarvam AI**.
 - **💳 Fully Integrated SaaS:** Built-in billing logic, Razorpay support, and automated credit tracking per tenant.
@@ -33,10 +32,9 @@ Vani AI is designed for horizontal scale across Railway (Backend) and Vercel (Fr
 ```mermaid
 graph TD;
     TW[Twilio Telephony] <--> |WebSocket| CM[Conversation Manager]
-    H[Hermes Agent] --> |Scrape News| BB[Browserbase]
     CM --> |Prompt Building| PB[Prompt Builder]
     PB --> |Inject Context| LLM[Groq / OpenRouter]
-    PB -.-> |Load Research| DB[(Supabase PG)]
+    PB -.-> |Load Campaign| DB[(Supabase PG)]
     LLM --> |Voice| TTS[Sarvam TTS]
     TTS --> |Audio| CM
     
@@ -44,12 +42,11 @@ graph TD;
     UI --> |Manage Leads| API[FastAPI Web]
     API --> |Queue Tasks| REDIS[(Redis)]
     REDIS --> CEL[Celery Workers]
-    CEL --> |Research Lead| H
 ```
 
 ---
 
-## 🛠️ Deployment (Phase 7)
+## 🛠️ Deployment
 
 ### 1. Backend (Railway)
 The backend is configured to run dual services from a single repository:
@@ -94,7 +91,6 @@ SUPABASE_URL=
 SUPABASE_ANON_KEY=
 DATABASE_URL=
 REDIS_URL=
-BROWSERBASE_API_KEY=
 ```
 
 ### 3. Development
@@ -120,6 +116,6 @@ Access our interactive Swagger documentation at `BASE_URL/docs` once the server 
   <b>Vani AI: Empowering the Next Generation of Intelligent Voice Pipelines.</b><br>
   <i>Built for scale. Built for conversion.</i>
 </div>
+
 ## Testing
-Integration tests live in tests/. Do not use the legacy test_api.py — it has been removed.
-STT is handled by Groq Whisper (REST). Use pytest tests/integration/ for end-to-end coverage.
+Integration tests live in tests/. STT is handled by Groq Whisper (REST). Use pytest tests/integration/ for end-to-end coverage.
