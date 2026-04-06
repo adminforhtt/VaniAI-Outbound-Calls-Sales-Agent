@@ -34,7 +34,7 @@ class LLMService:
             "model": selected_model,
             "messages": messages,
             "temperature": 0.5,
-            "max_tokens": 300,
+            "max_tokens": 150,
             "stream": True,
             "stop": ["User:", "Agent:", "\n\n"]
         }
@@ -109,6 +109,8 @@ class LLMService:
                                                 break
                         except Exception:
                             continue
+                if buffer and not in_think:
+                    yield buffer
         except Exception as e:
             logger.error(f"Error in LLM streaming using {selected_model} ({provider}): {e}")
             yield ""
@@ -135,8 +137,8 @@ class LLMService:
         payload = {
             "model": selected_model,
             "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 300,
+            "temperature": 0.5,
+            "max_tokens": 150,
             "stop": ["User:", "Agent:", "\n\n"]
         }
         
