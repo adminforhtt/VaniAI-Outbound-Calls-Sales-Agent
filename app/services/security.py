@@ -27,7 +27,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     """
     Validates the Supabase JWT and fetches the corresponding Tenant ID from our database.
     """
-    if settings.BYPASS_AUTH:
+    if str(settings.BYPASS_AUTH).lower() == "true":
         logger.warning("⚠️ SECURITY_WARNING: AUTH BYPASS IS ENABLED! Returning dummy demo user.")
         from app.models.core import User
         # Try to find the first admin user in the DB to represent the demo
