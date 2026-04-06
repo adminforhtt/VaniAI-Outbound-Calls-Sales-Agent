@@ -29,13 +29,11 @@ def get_current_user_optional(request: Request, db: Session = Depends(get_db)):
     Checks for auth bypass OR a valid token. If bypass is on, returns a dummy user.
     """
     if str(settings.BYPASS_AUTH).lower() == "true":
-        logger.warning("⚠️ SECURITY_WARNING: AUTH BYPASS IS ENABLED! Returning dummy demo user.")
-        from app.models.core import User
-        admin = db.query(User).filter(User.role == "admin").first()
+        logger.warning("⚠️ SECURITY_WARNING: AUTH BYPASS IS ENABLED! Returning hardcoded demo user.")
         return {
             "sub": "demo-uuid",
-            "email": admin.email if admin else "demo@vani.ai",
-            "tenant_id": admin.tenant_id if admin else 1,
+            "email": "demo@vani.ai",
+            "tenant_id": 1,
             "role": "admin"
         }
         
