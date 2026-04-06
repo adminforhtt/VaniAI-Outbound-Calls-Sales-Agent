@@ -46,79 +46,16 @@ def inject_prosody(text: str) -> str:
 
 
 def normalize_audio(pcm_data: bytes, sampwidth: int) -> bytes:
-    """Normalize PCM volume to target RMS, apply +2dB gain."""
-    if not pcm_data:
-        return pcm_data
-    
-    try:
-        rms = audioop.rms(pcm_data, sampwidth)
-        if rms == 0:
-            return pcm_data
-        
-        # Target RMS for clear telephony audio (reduced to prevent clipping)
-        target_rms = 3000
-        gain_factor = target_rms / rms
-        
-        # Clamp gain to prevent distortion
-        gain_factor = min(gain_factor, 2.0)
-        gain_factor = max(gain_factor, 0.5)
-        
-        # Apply gain via audioop.mul
-        pcm_data = audioop.mul(pcm_data, sampwidth, gain_factor)
-        
-        return pcm_data
-    except Exception as e:
-        logger.warning(f"Audio normalization failed: {e}")
-        return pcm_data
+    # Normalization disabled to prevent loud distortion.
+    return pcm_data
 
 
-def apply_telephony_filter(pcm_data: bytes, sampwidth: int) -> bytes:
-    """Simple low-pass filter for telephony clarity (attenuate >3kHz)."""
-    if not pcm_data or len(pcm_data) < sampwidth * 4:
-        return pcm_data
-    
-    try:
-        # Apply bias removal
-        pcm_data = audioop.bias(pcm_data, sampwidth, 0)
-        return pcm_data
-    except Exception as e:
-        logger.warning(f"Telephony filter failed: {e}")
-        return pcm_data
+    # Filter disabled to maintain raw sound quality.
+    return pcm_data
 
 
-def add_fade_edges(pcm_data: bytes, sampwidth: int, fade_ms: int = 30) -> bytes:
-    """Add fade-in/fade-out to prevent audio clicks/pops."""
-    if not pcm_data:
-        return pcm_data
-    
-    try:
-        n_samples = len(pcm_data) // sampwidth
-        fade_samples = min(int(8000 * fade_ms / 1000), n_samples // 4)
-        
-        if fade_samples < 2:
-            return pcm_data
-        
-        # Convert to list of samples
-        fmt = '<' + ('h' if sampwidth == 2 else 'b') * n_samples
-        if len(pcm_data) != struct.calcsize(fmt):
-            return pcm_data
-        
-        samples = list(struct.unpack(fmt, pcm_data))
-        
-        # Fade in
-        for i in range(fade_samples):
-            factor = i / fade_samples
-            samples[i] = int(samples[i] * factor)
-        
-        # Fade out
-        for i in range(fade_samples):
-            factor = i / fade_samples
-            samples[n_samples - 1 - i] = int(samples[n_samples - 1 - i] * factor)
-        
-        return struct.pack(fmt, *samples)
-    except Exception as e:
-        logger.warning(f"Fade edges failed: {e}")
-        return pcm_data
+    # Fades disabled to prevent bit-crushing noise.
+    return pcm_data
 
 
 class TTSService:
