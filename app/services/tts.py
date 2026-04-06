@@ -160,8 +160,7 @@ class TTSService:
                 if audio_bytes:
                     yield audio_bytes
                 else:
-                    # 0.5s mulaw silence
-                    yield bytes([0x7F] * 4000)
+                    yield b""
             except Exception as e:
                 logger.error(f"[TTS streaming] Chunk failed: {e}. Yielding silence.")
-                yield bytes([0x7F] * 4000)
+                yield b""

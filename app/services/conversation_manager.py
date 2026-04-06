@@ -915,6 +915,7 @@ class ConversationManager:
                 complete_response = ""
                 chunk_buffer = ""
                 first_token = True
+                has_played_fallback = False
                 
                 async for llm_chunk in LLMService.generate_response_stream(messages, provider=self.llm_provider):
                     if asyncio.current_task().cancelled(): return
@@ -932,13 +933,21 @@ class ConversationManager:
                             s = s.strip()
                             if s:
                                 async for audio in TTSService.generate_speech_streaming(s, language=self.language, speaker=self.voice):
-                                    await self.send_audio_safe(audio)
+                                    if not audio and not has_played_fallback:
+                                        await self.send_audio_safe(audio)
+                                        has_played_fallback = True
+                                    elif audio:
+                                        await self.send_audio_safe(audio)
                         chunk_buffer = sentences[-1]
 
                 # Final buffer flush
                 if chunk_buffer.strip():
                     async for audio in TTSService.generate_speech_streaming(chunk_buffer.strip(), language=self.language, speaker=self.voice):
-                        await self.send_audio_safe(audio)
+                        if not audio and not has_played_fallback:
+                            await self.send_audio_safe(audio)
+                            has_played_fallback = True
+                        elif audio:
+                            await self.send_audio_safe(audio)
 
                 valid_response = complete_response if complete_response else fallback_response(self.language)
 
