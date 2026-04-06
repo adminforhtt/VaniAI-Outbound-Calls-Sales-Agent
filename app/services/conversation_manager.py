@@ -462,8 +462,27 @@ class ConversationManager:
         for lang_code in ["hi", "mr", "ta", "te", "bn", "en"]:
             fallback_path = os.path.join(fallback_dir, f"fallback_{lang_code}.wav")
             if os.path.exists(fallback_path):
-                with open(fallback_path, "rb") as f:
-                    self._fallback_audio_cache[lang_code] = base64.b64encode(f.read()).decode()
+                try:
+                    import wave, audioop, struct
+                    with wave.open(fallback_path, "rb") as wav:
+                        pcm_data = wav.readframes(wav.getnframes())
+                        sampwidth = wav.getsampwidth()
+                        framerate = wav.getframerate()
+                        channels = wav.getnchannels()
+                        
+                        if channels > 1:
+                            pcm_data = audioop.tomono(pcm_data, sampwidth, 1, 1)
+                        if sampwidth != 2:
+                            pcm_data = audioop.lin2lin(pcm_data, sampwidth, 2)
+                            sampwidth = 2
+                        if framerate != 8000:
+                            pcm_data, _ = audioop.ratecv(pcm_data, sampwidth, 1, framerate, 8000, None)
+                            
+                        # Encode to mu-law
+                        ulaw_data = audioop.lin2ulaw(pcm_data, sampwidth)
+                        self._fallback_audio_cache[lang_code] = base64.b64encode(ulaw_data).decode()
+                except Exception as e:
+                    logger.warning(f"Error parsing fallback {fallback_path}: {e}")
             else:
                 logger.warning(f"[ConversationManager] Missing fallback audio for lang: {lang_code}")
 

@@ -104,6 +104,13 @@ class TTSService:
                 framerate = wav.getframerate()
                 channels = wav.getnchannels()
 
+            # 🛠 BUG FIX: Correct float32 to int16 (little-endian)
+            if sampwidth == 4:
+                floats = struct.unpack(f"<{len(pcm_data)//4}f", pcm_data)
+                ints = [max(-32768, min(32767, int(f * 32767.0))) for f in floats]
+                pcm_data = struct.pack(f"<{len(ints)}h", *ints)
+                sampwidth = 2
+
             if channels > 1:
                 pcm_data = audioop.tomono(pcm_data, sampwidth, 1, 1)
 
