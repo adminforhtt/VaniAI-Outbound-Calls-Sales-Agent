@@ -1,5 +1,6 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
+from typing import Optional
 from app.config.settings import settings
 from supabase import create_client, Client
 from sqlalchemy.orm import Session
@@ -23,14 +24,13 @@ def get_supabase() -> Client:
         _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
     return _supabase_client
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user_optional(request: Request, db: Session = Depends(get_db)):
     """
-    Validates the Supabase JWT and fetches the corresponding Tenant ID from our database.
+    Checks for auth bypass OR a valid token. If bypass is on, returns a dummy user.
     """
     if str(settings.BYPASS_AUTH).lower() == "true":
         logger.warning("⚠️ SECURITY_WARNING: AUTH BYPASS IS ENABLED! Returning dummy demo user.")
         from app.models.core import User
-        # Try to find the first admin user in the DB to represent the demo
         admin = db.query(User).filter(User.role == "admin").first()
         return {
             "sub": "demo-uuid",
@@ -38,6 +38,13 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             "tenant_id": admin.tenant_id if admin else 1,
             "role": "admin"
         }
+        
+    # Manual token check to avoid early 401 from OAuth2PasswordBearer
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
 
     try:
         # Validate JWT via Supabase API
@@ -69,7 +76,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def get_auth_tenant(current_user: dict = Depends(get_current_user)) -> int:
+def get_auth_tenant(current_user: dict = Depends(get_current_user_optional)) -> int:
     tenant_id = current_user.get("tenant_id")
     if not tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized or no tenant mapped. Try logging out and in again.")
