@@ -155,7 +155,6 @@ SESSION DATA
 - Memory: {', '.join(intent_memory) if intent_memory else 'none'}
 - Intro needed: {'YES' if turn_count == 1 else 'NO'}
 """
-"""
     
     logger.debug(f"FULL_SYSTEM_PROMPT:\n{system_prompt}")
     
