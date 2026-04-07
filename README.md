@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./assets/banner.png" alt="Vani AI Banner" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+
 # 🎙️ Vani AI: Enterprise Outbound Sales Agent
 **Production-Grade Conversational AI for Multi-Tenant SaaS**
 
