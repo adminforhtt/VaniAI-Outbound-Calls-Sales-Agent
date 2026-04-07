@@ -5,30 +5,37 @@
 
 /* --- CSS Custom Properties (Design Tokens) --- */
 :root {
-  /* Colors */
-  --bg-gradient-start: #FFB787;
-  --bg-gradient-mid: #EAF0F6;
-  --bg-gradient-end: #A7C7F9;
+  /* Colors - More Vivid */
+  --bg-gradient-start: #F8FAFC;
+  --bg-gradient-mid: #F1F5F9;
+  --bg-gradient-end: #E2E8F0;
 
   --surface: #FFFFFF;
-  --surface-hover: #FAFBFD;
-  --surface-muted: #F4F6FA;
+  --surface-hover: #F8FAFC;
+  --surface-muted: #F1F5F9;
 
-  --text-primary: #1A2138;
-  --text-secondary: #6B7A99;
-  --text-muted: #9BA8BF;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
   --text-white: #FFFFFF;
 
-  --accent-blue: #4F9CF7;
-  --accent-coral: #FF6B6B;
-  --accent-green: #2CC985;
-  --accent-purple: #6C5CE7;
-  --accent-orange: #FFA94D;
+  --accent-blue: #3B82F6;
+  --accent-coral: #F43F5E;
+  --accent-green: #10B981;
+  --accent-purple: #8B5CF6;
+  --accent-orange: #F59E0B;
 
-  /* Card accents (pastel gradients matching Dribbble) */
-  --card-gradient-1: linear-gradient(135deg, #C3FAE8 0%, #A7F3D0 50%, #6EE7B7 100%);
-  --card-gradient-2: linear-gradient(135deg, #FED7AA 0%, #FECACA 50%, #FCA5A5 100%);
-  --card-gradient-3: linear-gradient(135deg, #C7D2FE 0%, #DDD6FE 50%, #E9D5FF 100%);
+  /* Card accents - Premium Vibrant */
+  --card-gradient-1: linear-gradient(135deg, #60A5FA 0%, #3B82F6 100%);
+  --card-gradient-2: linear-gradient(135deg, #F43F5E 0%, #E11D48 100%);
+  --card-gradient-3: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+
+  /* Shadows - More Depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-premium: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 
   /* Spacing */
   --space-xs: 4px;
@@ -109,7 +116,12 @@ input, textarea, select {
   outline: none;
 }
 
-/* --- Hide Scrollbar --- */
+/* --- Enhanced Scrollbar --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -376,11 +388,17 @@ input, textarea, select {
 /* --- Profile Card --- */
 .profile-card {
   background: var(--surface);
-  border: 1px solid #F0F3F8;
+  border: 1px solid rgba(0, 0, 0, 0.03);
   border-radius: var(--radius-lg);
-  padding: var(--space-lg);
+  padding: 32px 24px;
   text-align: center;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-premium);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.profile-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl);
 }
 
 .profile-avatar {
@@ -1115,66 +1133,69 @@ input, textarea, select {
 }
 
 .side-nav {
-  width: 240px;
-  background: #FFFFFF;
-  border-right: 1px solid #F1F5F9;
+  width: 250px;
+  background: #0f172a;
+  border-right: 1px solid #1e293b;
   display: flex;
   flex-direction: column;
-  padding: var(--space-xl) var(--space-md);
+  padding: 32px 12px;
   flex-shrink: 0;
   z-index: 50;
+  color: #94a3b8;
 }
 
 .nav-logo {
-  font-size: 1.4rem;
-  font-weight: 850;
-  color: var(--text-primary);
-  margin-bottom: 40px;
-  padding-left: var(--space-md);
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #fff;
+  margin-bottom: 48px;
+  padding-left: 16px;
   cursor: pointer;
   letter-spacing: -0.04em;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .nav-logo::before {
   content: "";
-  width: 12px;
-  height: 12px;
-  background: var(--accent-blue);
-  border-radius: 3px;
+  width: 32px;
+  height: 32px;
+  background: var(--card-gradient-1);
+  border-radius: 8px;
   display: inline-block;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  color: #64748B;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #94a3b8;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.9375rem;
   cursor: pointer;
-  transition: all var(--transition-base);
-  margin-bottom: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-bottom: 4px;
 }
 
 .nav-item:hover {
-  background: #F8FAFC;
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
   transform: translateX(4px);
 }
 
 .nav-item.active {
-  background: var(--surface-muted);
-  color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
 }
 
 .nav-item svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   stroke-width: 2;
 }
 
@@ -1185,21 +1206,21 @@ input, textarea, select {
 
 .logout-btn {
   width: 100%;
-  padding: 10px 16px;
+  padding: 12px 16px;
   text-align: left;
-  color: #94A3B8;
+  color: #94a3b8;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   display: flex;
   align-items: center;
   gap: 10px;
   transition: all 0.2s;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 .logout-btn:hover {
-  color: var(--accent-coral);
-  background: #FFF1F2;
+  color: #fb7185;
+  background: rgba(244, 63, 94, 0.1);
 }
 
 .content {

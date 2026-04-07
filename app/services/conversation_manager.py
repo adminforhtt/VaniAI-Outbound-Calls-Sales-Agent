@@ -696,18 +696,14 @@ class ConversationManager:
                     # ── Confidence Gate for Twilio Barge-in / Transcript ──
                     is_garbage = is_garbage_stt(text)
 
-                    # ── SOFT BARGE-IN (with protection window + fade-out) ──
+                    # ── HARD BARGE-IN (Faster detection for overspeaking) ──
                     if self.speaking_task and not self.speaking_task.done():
-                        # Only allow barge-in if the incoming STT is not garbage hallucinations
                         if not is_garbage:
                             speech_ms = result.get("speech_ms", 0)
-                            time_since = time.time() - self.last_agent_speech_time
-                            # Only allow barge-in if agent has been speaking for >1.5s AND user spoke >800ms
-                            if speech_ms >= 800 and time_since > 1.5:
-                                logger.info(f"⚡ SOFT_BARGE_IN: {text} (duration: {speech_ms}ms, agent_played: {time_since:.1f}s)")
+                            # Allow barge-in if user spoke for >400ms
+                            if speech_ms >= 400:
+                                logger.info(f"⚡ BARGE_IN_DETECTED: {text} ({speech_ms}ms)")
                                 await self.latency_controller.on_user_barge_in()
-                                # Soft cancel: send clear after 150ms for fade effect
-                                await asyncio.sleep(0.15)
                                 self.cancel_ongoing_tts()
                                 await self.send_clear_to_twilio()
 
@@ -898,11 +894,14 @@ class ConversationManager:
                 full_system_prompt = f"{system_prompt_template}\nRecent Context:\n{hist_str}\nUser: {user_text}\n\nAgent:"
                 messages = [{"role": "system", "content": full_system_prompt}]
 
-                # ── STREAMING LLM -> TTS PIPELINE ──
+                # ── STREAMING LLM (JSON) -> TTS PIPELINE ──
                 complete_response = ""
-                chunk_buffer = ""
+                played_chunks = []
                 first_token = True
                 has_played_fallback = False
+                
+                # Regex to find "text": "..." values in partially-formed JSON
+                text_extractor = re.compile(r'\"text\":\s*\"([^\"]+)\"', re.DOTALL)
                 
                 async for llm_chunk in LLMService.generate_response_stream(messages, provider=self.llm_provider):
                     if asyncio.current_task().cancelled(): return
@@ -911,32 +910,51 @@ class ConversationManager:
                         first_token = False
                     
                     complete_response += llm_chunk
-                    chunk_buffer += llm_chunk
                     
-                    # Split into sentences for parallel TTS
-                    if any(p in chunk_buffer for p in ['.', '!', '?', '।', '॥']):
-                        sentences = _HARD_SENTENCE_BREAKS.split(chunk_buffer)
-                        for s in sentences[:-1]:
-                            s = s.strip()
-                            if s:
-                                async for audio in TTSService.generate_speech_streaming(s, language=self.language, speaker=self.voice):
-                                    if not audio and not has_played_fallback:
+                    # Extract all current text chunks and pauses from the buffer
+                    # Using a more robust regex for JSON field extraction
+                    field_extractor = re.compile(r'\{[^{}]*\"text\":\s*\"([^\"]+)\"[^{}]*\}', re.DOTALL)
+                    pause_extractor = re.compile(r'\"pause_ms\":\s*(\d+)', re.DOTALL)
+                    
+                    found_matches = list(field_extractor.finditer(complete_response))
+                    
+                    if len(found_matches) > len(played_chunks):
+                        for i in range(len(played_chunks), len(found_matches)):
+                            match = found_matches[i]
+                            chunk_text = match.group(1).replace('\\n', ' ').replace('\\"', '"').strip()
+                            
+                            # Try to find a pause_ms within this JSON object
+                            obj_content = match.group(0)
+                            pause_match = pause_extractor.search(obj_content)
+                            pause_ms = int(pause_match.group(1)) if pause_match else 150
+                            
+                            if chunk_text:
+                                logger.info(f"🔊 Streaming Chunk: '{chunk_text}' (pause: {pause_ms}ms)")
+                                async for audio in TTSService.generate_speech_streaming(chunk_text, language=self.language, speaker=self.voice):
+                                    if audio:
                                         await self.send_audio_safe(audio)
-                                        has_played_fallback = True
-                                    elif audio:
-                                        await self.send_audio_safe(audio)
-                        chunk_buffer = sentences[-1]
+                                
+                                # Add natural human-like pause between chunks
+                                await asyncio.sleep(pause_ms / 1000.0)
+                                played_chunks.append(chunk_text)
 
-                # Final buffer flush
-                if chunk_buffer.strip():
-                    async for audio in TTSService.generate_speech_streaming(chunk_buffer.strip(), language=self.language, speaker=self.voice):
-                        if not audio and not has_played_fallback:
+                # Final fallback check if JSON was empty or malformed
+                if not played_chunks and complete_response.strip():
+                    # If LLM didn't follow JSON, just play the raw text as fallback
+                    plaintext = complete_response.strip()
+                    # Clean up some common JSON artifacts if it looks like it started but failed
+                    if plaintext.startswith('{'):
+                         # Try to find any text between double quotes after "text":
+                         match = re.search(r'\"text\":\s*\"([^\"]+)\"', plaintext)
+                         if match: plaintext = match.group(1)
+                         
+                    async for audio in TTSService.generate_speech_streaming(plaintext, language=self.language, speaker=self.voice):
+                        if audio:
                             await self.send_audio_safe(audio)
-                            has_played_fallback = True
-                        elif audio:
-                            await self.send_audio_safe(audio)
+                        played_chunks.append(plaintext)
 
-                valid_response = complete_response if complete_response else fallback_response(self.language)
+                # Store clean result for history
+                valid_response = " ".join(played_chunks) if played_chunks else fallback_response(self.language)
 
             # Update State & Cache
             new_stage = compute_next_state(self.state, user_text, self.intent_memory, self.turn_count)

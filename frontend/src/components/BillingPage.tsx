@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import './BillingPage.css';
 
 interface UsageData {
   plan: string;
@@ -23,7 +24,6 @@ function BillingPage({ token }: { token: string }) {
   useEffect(() => {
     fetchUsage();
 
-    // Dynamically load Razorpay script
     const script = document.createElement('script');
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
@@ -52,12 +52,12 @@ function BillingPage({ token }: { token: string }) {
 
       const data = await res.json();
 
-      // Mock mode — no Razorpay keys configured
       if (data.key_id === 'rzp_test_mock') {
         setPaymentStatus({
           type: 'success',
-          message: `Plan upgrade simulated (mock mode). Order: ${data.order_id}. Configure RAZORPAY_KEY_ID in .env for live payments.`,
+          message: `Plan upgrade simulated. Order: ${data.order_id}.`,
         });
+        fetchUsage();
         return;
       }
 
@@ -69,7 +69,6 @@ function BillingPage({ token }: { token: string }) {
         description: `Upgrade to ${plan.toUpperCase()} plan`,
         order_id: data.order_id,
         handler: async function (response: any) {
-          // Verify payment on the server
           try {
             const verRes = await fetch(`${API}/billing/verify-payment`, {
               method: 'POST',
@@ -86,13 +85,13 @@ function BillingPage({ token }: { token: string }) {
             });
             const verData = await verRes.json();
             if (verRes.ok) {
-              setPaymentStatus({ type: 'success', message: `🎉 Payment successful! Upgraded to ${verData.plan?.toUpperCase()} plan (${verData.limit} calls/mo).` });
+              setPaymentStatus({ type: 'success', message: `🎉 Payment successful! Upgraded to ${verData.plan?.toUpperCase()} plan.` });
               fetchUsage();
             } else {
-              setPaymentStatus({ type: 'error', message: `Payment verification failed: ${verData.detail}` });
+              setPaymentStatus({ type: 'error', message: `Verify failed: ${verData.detail}` });
             }
           } catch (e) {
-            setPaymentStatus({ type: 'error', message: 'Payment verified by Razorpay but server confirmation failed. Contact support.' });
+            setPaymentStatus({ type: 'error', message: 'Server confirmation failed. Contact support.' });
           }
         },
         prefill: { name: 'Vani AI User' },
@@ -100,13 +99,10 @@ function BillingPage({ token }: { token: string }) {
       };
 
       const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
-        setPaymentStatus({ type: 'error', message: `Payment failed: ${response.error.description}` });
-      });
+      rzp.on('payment.failed', (response: any) => setPaymentStatus({ type: 'error', message: response.error.description }));
       rzp.open();
 
     } catch (e) {
-      console.error('Checkout error:', e);
       setPaymentStatus({ type: 'error', message: 'Network error during checkout.' });
     }
     setLoading(false);
@@ -115,123 +111,83 @@ function BillingPage({ token }: { token: string }) {
   const PLANS = [
     { id: 'free', name: 'Free', price: '₹0', limit: 50, features: ['3 Languages', 'Community Support', 'Basic Analytics'] },
     { id: 'starter', name: 'Starter', price: '₹3,999', limit: 500, features: ['6 Languages', 'Email Support', 'Lead Enrichment (100/mo)'] },
-    { id: 'growth', name: 'Growth', price: '₹11,999', limit: 2000, features: ['All 11 Languages', 'Priority Support', 'Script Evolution (Weekly)', 'Full Intelligence Console'] },
+    { id: 'growth', name: 'Growth', price: '₹11,999', limit: 2000, features: ['All 11 Languages', 'Priority Support', 'Full Analytics', 'Custom Voices'], popular: true },
     { id: 'enterprise', name: 'Enterprise', price: '₹39,999', limit: 10000, features: ['Custom Call Limits', 'Dedicated Support', 'White-label Option', 'SLA Guarantee'] },
   ];
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
-      <header style={{ marginBottom: '32px' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#111827', margin: '0 0 6px' }}>Billing & Subscriptions</h1>
-        <p style={{ color: '#6B7280', margin: 0 }}>Manage your plan and track calling usage.</p>
+    <div className="billing-container">
+      <header className="billing-header" style={{ marginBottom: '48px' }}>
+        <p style={{ fontWeight: 700, color: '#4F46E5', fontSize: '0.9rem', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Subscription</p>
+        <h1>Manage Billing</h1>
+        <p>Current plan: <strong>{usage.plan.toUpperCase()}</strong>. Monitor your usage below.</p>
       </header>
 
-      {/* Payment Status Banner */}
       {paymentStatus && (
-        <div style={{
-          padding: '14px 20px',
-          borderRadius: '12px',
-          marginBottom: '24px',
-          background: paymentStatus.type === 'success' ? '#ECFDF5' : '#FEF2F2',
-          color: paymentStatus.type === 'success' ? '#065F46' : '#991B1B',
-          border: `1px solid ${paymentStatus.type === 'success' ? '#A7F3D0' : '#FECACA'}`,
-          fontSize: '0.875rem',
-          fontWeight: 500,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
+        <div className={`status-banner ${paymentStatus.type === 'success' ? 'status-success' : 'status-error'}`}>
           <span>{paymentStatus.message}</span>
-          <button
-            onClick={() => setPaymentStatus(null)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.2rem', lineHeight: 1 }}
-          >×</button>
+          <button onClick={() => setPaymentStatus(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.25rem' }}>×</button>
         </div>
       )}
 
-      {/* Usage Meter */}
-      <section style={{ background: 'white', padding: '28px 32px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.08)', marginBottom: '40px', border: '1px solid #F3F4F6' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '16px' }}>
+      {/* Glassmorphism Usage Card */}
+      <section className="usage-card">
+        <div className="usage-header">
           <div>
-            <p style={{ fontSize: '0.75rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, margin: '0 0 4px' }}>Current Usage</p>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>{usage.used} / {usage.limit} calls used</h2>
+            <div className="usage-title">Current monthly usage</div>
+            <div className="usage-count">{usage.used.toLocaleString()} / {usage.limit.toLocaleString()} <span style={{ fontSize: '1rem', color: '#64748b', fontWeight: 500 }}>calls</span></div>
           </div>
-          <span style={{ background: '#F3F4F6', padding: '4px 14px', borderRadius: '20px', fontSize: '0.875rem', fontWeight: 600, color: '#4B5563' }}>
-            {usage.plan.toUpperCase()} Plan
-          </span>
+          <div className="plan-badge">{usage.plan}</div>
         </div>
-        <div style={{ width: '100%', height: '10px', background: '#F3F4F6', borderRadius: '5px', overflow: 'hidden' }}>
-          <div style={{
-            width: `${Math.min(100, usage.percentage)}%`,
-            height: '100%',
-            background: usage.percentage >= 90 ? '#EF4444' : '#4F46E5',
-            borderRadius: '5px',
-            transition: 'width 0.5s ease',
-          }} />
+        
+        <div className="progress-container">
+          <div 
+            className={`progress-bar ${usage.percentage >= 90 ? 'danger' : usage.percentage >= 70 ? 'warning' : ''}`}
+            style={{ width: `${Math.min(100, usage.percentage)}%` }}
+          />
         </div>
+        
         {usage.percentage >= 90 && (
-          <p style={{ color: '#EF4444', fontSize: '0.875rem', marginTop: '10px', fontWeight: 600 }}>
-            ⚠️ You are near your monthly limit. Upgrade now to avoid call interruptions.
+          <p style={{ color: '#EF4444', fontSize: '0.875rem', marginTop: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            Usage alert: You are nearing your monthly call limit.
           </p>
         )}
       </section>
 
-      {/* Plans Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' }}>
+      <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '24px', textAlign: 'center' }}>Available Plans</h2>
+      
+      <div className="plans-grid">
         {PLANS.map(plan => {
           const isCurrent = plan.id === usage.plan;
           return (
-            <div
-              key={plan.id}
-              style={{
-                background: isCurrent ? '#FAFAF9' : 'white',
-                border: isCurrent ? '2px solid #4F46E5' : '1px solid #E5E7EB',
-                padding: '28px 24px',
-                borderRadius: '16px',
-                textAlign: 'center',
-                position: 'relative',
-                transition: 'box-shadow 0.2s',
-              }}
-            >
+            <div key={plan.id} className={`plan-card ${isCurrent ? 'current' : ''}`}>
+              {plan.popular && <div className="popular-badge">MOST POPULAR</div>}
               {isCurrent && (
-                <span style={{
-                  position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)',
-                  background: '#4F46E5', color: 'white', padding: '3px 14px',
-                  borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
-                }}>
-                  CURRENT PLAN
-                </span>
+                <div style={{ color: '#4F46E5', fontSize: '0.7rem', fontWeight: 800, marginBottom: '8px', letterSpacing: '0.05em' }}>YOUR ACTIVE PLAN</div>
               )}
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, marginBottom: '8px' }}>{plan.name}</h3>
-              <div style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '20px' }}>
-                {plan.price}<span style={{ fontSize: '0.9rem', color: '#6B7280', fontWeight: 400 }}>/mo</span>
-              </div>
-              <ul style={{ textAlign: 'left', listStyle: 'none', padding: 0, marginBottom: '28px', fontSize: '0.875rem', color: '#4B5563' }}>
-                <li style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#10B981"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"/></svg>
-                  <strong>{plan.limit.toLocaleString()}</strong> calls/mo
+              <h3 className="card-title">{plan.name}</h3>
+              <div className="card-price">{plan.price}<span>/mo</span></div>
+              
+              <ul className="features-list">
+                <li className="feature-item">
+                  <svg className="feature-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"/></svg>
+                  <span><strong>{plan.limit.toLocaleString()}</strong> calls included</span>
                 </li>
                 {plan.features.map(f => (
-                  <li key={f} style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#10B981"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"/></svg>
-                    {f}
+                  <li key={f} className="feature-item">
+                    <svg className="feature-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"/></svg>
+                    <span>{f}</span>
                   </li>
                 ))}
               </ul>
+
               <button
-                id={`billing-btn-${plan.id}`}
-                style={{
-                  width: '100%', padding: '11px',
-                  background: isCurrent ? '#CBD5E1' : '#4F46E5',
-                  color: 'white', borderRadius: '10px', fontWeight: 600,
-                  cursor: isCurrent || loading ? 'default' : 'pointer',
-                  border: 'none', fontSize: '0.875rem',
-                  opacity: (loading || isCurrent) ? 0.75 : 1,
-                }}
+                className={`plan-button ${isCurrent ? 'btn-secondary' : 'btn-primary'}`}
                 disabled={loading || isCurrent}
                 onClick={() => handleCheckout(plan.id)}
               >
-                {isCurrent ? 'Current Plan' : plan.id === 'free' ? 'Downgrade to Free' : `Upgrade to ${plan.name}`}
+                {isCurrent ? 'Current Plan' : `Upgrade to ${plan.name}`}
               </button>
             </div>
           );
@@ -242,3 +198,4 @@ function BillingPage({ token }: { token: string }) {
 }
 
 export default BillingPage;
+

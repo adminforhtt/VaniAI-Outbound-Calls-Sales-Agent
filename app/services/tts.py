@@ -73,11 +73,15 @@ class TTSService:
             "api-subscription-key": settings.SARVAM_API_KEY,
             "Content-Type": "application/json"
         }
+        # Language-specific pace optimization
+        # Marathi (mr-IN) needs slightly slower pace for better phonetic clarity in telephony
+        pace = 1.08 if language == "mr-IN" else 1.12
+        
         payload = {
             "inputs": [processed_text],
             "target_language_code": language,
-            "speaker": VOICE_MAP.get(speaker.lower(), "anand"),
-            "pace": 1.15,  # Slightly faster conversational speed to prevent 'sleepy' feeling & reduce response latency
+            "speaker": resolved_speaker,
+            "pace": pace,
             "speech_sample_rate": 8000,
             "enable_preprocessing": True,
             "model": "bulbul:v3"

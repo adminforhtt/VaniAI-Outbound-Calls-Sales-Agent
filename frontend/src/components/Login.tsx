@@ -108,13 +108,15 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
           </button>
         </form>
 
-        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px', color: '#6B7280' }}>
+        <div className="login-footer" style={{ marginTop: '32px', textAlign: 'center', fontSize: '14px', color: '#64748B' }}>
           {isSignup ? "Already have an account?" : "New to Vani AI?"}{' '}
           <button 
+            type="button"
+            className="toggle-auth-btn"
             onClick={() => setIsSignup(!isSignup)}
-            style={{ color: '#6366F1', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            style={{ color: 'var(--accent-blue)', fontWeight: 700, padding: '4px 8px', borderRadius: '8px', transition: 'all 0.2s' }}
           >
-            {isSignup ? 'Log in' : 'Create one for free'}
+            {isSignup ? 'Log in' : 'Create an account'}
           </button>
         </div>
       </div>
