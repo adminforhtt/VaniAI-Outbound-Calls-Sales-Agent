@@ -889,10 +889,9 @@ class ConversationManager:
                     intent_memory=self.intent_memory,
                     turn_count=self.turn_count,
                 )
-                recent_history = history[-5:]
-                hist_str = "\n".join([f"{'User' if m['role']=='user' else 'Agent'}: {m['content']}" for m in recent_history])
-                full_system_prompt = f"{system_prompt_template}\nRecent Context:\n{hist_str}\nUser: {user_text}\n\nAgent:"
-                messages = [{"role": "system", "content": full_system_prompt}]
+                messages = [{"role": "system", "content": system_prompt_template}]
+                for m in history[-6:]:  # KEEP LAST 3 TURNS FOR CONTEXT
+                    messages.append({"role": m["role"], "content": m["content"]})
 
                 # ── STREAMING LLM (JSON) -> TTS PIPELINE ──
                 complete_response = ""
