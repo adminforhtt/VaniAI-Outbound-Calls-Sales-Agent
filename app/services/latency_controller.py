@@ -57,8 +57,8 @@ class LatencyController:
     async def _latency_loop(self, intent: str):
         """Monitors time passed since user ended speech to inject smart masking."""
         try:
-            # 2. LATENCY TIMER: Wait for 800ms threshold
-            await asyncio.sleep(0.800) 
+            # 2. LATENCY TIMER: Wait for 1.5s threshold (more breathing room for 70B models)
+            await asyncio.sleep(1.500) 
             if not self._streaming_started:
                 # LLM still pulling tokens -> trigger thinking filler
                 filler_key = self._select_smart_filler('thinking', intent)
