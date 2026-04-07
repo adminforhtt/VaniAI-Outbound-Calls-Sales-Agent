@@ -151,7 +151,7 @@ SESSION DATA
 - User: {lead_name}
 - Stage: {stage}
 - Memory: {', '.join(intent_memory) if intent_memory else 'none'}
-- Intro Needed: {'YES' if turn_count == 1 else 'NO'}
+- Intro Needed: NO (You have already introduced yourself and the company. Do not repeat the greeting.)
 
 ========================
 GOAL
