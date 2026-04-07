@@ -22,8 +22,8 @@ class GroqWhisperSTT:
     """
 
     # VAD tuning constants
-    ENERGY_THRESHOLD = 300          # RMS energy above which we consider "speech"
-    SILENCE_DURATION_MS = 850       # 850ms silence -> trigger final transcription (FASTER)
+    ENERGY_THRESHOLD = 200          # RMS energy above which we consider "speech"
+    SILENCE_DURATION_MS = 650       # 650ms silence -> trigger final transcription (FASTER)
     PARTIAL_TRIGGER_MS = 200        # After 200ms of speech -> emit partial (FASTER BARGE-IN)
     MIN_SPEECH_DURATION_MS = 200    # ignore utterances shorter than this
     SAMPLE_RATE = 16000             # Groq native

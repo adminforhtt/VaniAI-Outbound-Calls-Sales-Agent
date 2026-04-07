@@ -276,7 +276,7 @@ def is_garbage_stt(text: str) -> bool:
         return False
     
     # Too short and not a known real word
-    if len(stripped) < 3:
+    if len(stripped) < 2:
         return True
     
     # Repetition of a single character (hallucination)
@@ -720,7 +720,7 @@ class ConversationManager:
                             self._stt_buffer.append(text)
                             
                             async def debounced_trigger():
-                                await asyncio.sleep(0.15)  # 150ms micro-buffer for sentence merging (VAD already applies 800ms silence detection)
+                                await asyncio.sleep(0.02)  # 20ms micro-buffer (lowered from 150ms to fix lag)
                                 combined_text = " ".join(self._stt_buffer)
                                 self._stt_buffer.clear()
                                 
