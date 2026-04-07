@@ -950,7 +950,18 @@ class ConversationManager:
                     async for audio in TTSService.generate_speech_streaming(plaintext, language=self.language, speaker=self.voice):
                         if audio:
                             await self.send_audio_safe(audio)
-                        played_chunks.append(plaintext)
+                    played_chunks.append(plaintext)
+                        
+                elif not played_chunks and not complete_response.strip():
+                    logger.error("LLM yielded an empty response (Provider error or timeout). Triggering safety fallback.")
+                    # Cancel the thinking filler because the LLM stream completely failed
+                    if first_token:
+                        await self.latency_controller.on_llm_first_token()
+                    
+                    fallback_txt = fallback_response(self.language)
+                    async for audio in TTSService.generate_speech_streaming(fallback_txt, language=self.language, speaker=self.voice):
+                        if audio:
+                            await self.send_audio_safe(audio)
 
                 # Store clean result for history
                 valid_response = " ".join(played_chunks) if played_chunks else fallback_response(self.language)
