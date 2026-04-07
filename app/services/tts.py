@@ -77,6 +77,7 @@ class TTSService:
         # Marathi (mr-IN) needs slightly slower pace for better phonetic clarity in telephony
         pace = 1.08 if language == "mr-IN" else 1.12
         
+        resolved_speaker = VOICE_MAP.get(speaker.lower(), "anand")
         payload = {
             "inputs": [processed_text],
             "target_language_code": language,
@@ -86,7 +87,6 @@ class TTSService:
             "enable_preprocessing": True,
             "model": "bulbul:v3"
         }
-        resolved_speaker = VOICE_MAP.get(speaker.lower(), "anand")
         logger.info(f"TTS speaker: {speaker!r} → resolved to '{resolved_speaker}'")
         try:
             t0 = time.time()
